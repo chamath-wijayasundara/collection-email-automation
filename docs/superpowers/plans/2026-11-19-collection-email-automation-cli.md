@@ -565,7 +565,7 @@ git commit -m "feat: persist workflow audit and idempotent actions"
 
 **Interfaces:**
 - Consumes: `RenderedEmail`, `DecisionResult`, `ActionResult`, `RunResult`, prior `ActionResult | None`, and all invoice trace models.
-- Produces: `DryRunExecutor.execute(rendered: RenderedEmail, decision: DecisionResult, destination: Path, idempotency_key: str, prior_action: ActionResult | None = None) -> ActionResult` and `OutputWriter.write_run(output_dir: Path, result: RunResult) -> None`.
+- Produces: `DryRunExecutor.execute(rendered: RenderedEmail, decision: DecisionResult, destination: Path, run_id: str, document_number: str, idempotency_key: str, prior_action: ActionResult | None = None) -> ActionResult` and `OutputWriter.write_run(output_dir: Path, result: RunResult) -> None`.
 
 - [ ] **Step 1: Write failing `.eml` safety tests**
 
