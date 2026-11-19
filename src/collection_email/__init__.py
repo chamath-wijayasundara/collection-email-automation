@@ -1,0 +1,1 @@
+"""Collection email automation package."""
