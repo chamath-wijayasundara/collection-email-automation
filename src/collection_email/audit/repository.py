@@ -107,6 +107,7 @@ class AuditRepository:
                 match_json TEXT CHECK(match_json IS NULL OR json_valid(match_json)),
                 response_json TEXT CHECK(response_json IS NULL OR json_valid(response_json)),
                 decision_json TEXT CHECK(decision_json IS NULL OR json_valid(decision_json)),
+                action_id TEXT REFERENCES actions(action_id),
                 action_json TEXT CHECK(action_json IS NULL OR json_valid(action_json)),
                 error_json TEXT CHECK(error_json IS NULL OR json_valid(error_json)),
                 PRIMARY KEY (run_id, document_number)
@@ -144,14 +145,15 @@ class AuditRepository:
         document_number = document_number or self._document_number(record, eligibility)
         if not document_number:
             raise ValueError("An invoice trace needs a document number.")
+        action_id = self._action_id(action)
 
         with self._transaction() as connection:
             connection.execute(
                 """
                 INSERT INTO invoice_traces (
                     run_id, document_number, record_json, eligibility_json, match_json,
-                    response_json, decision_json, action_json, error_json
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    response_json, decision_json, action_id, action_json, error_json
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     run_id,
@@ -161,6 +163,7 @@ class AuditRepository:
                     self._json_or_none(match),
                     self._json_or_none(response),
                     self._json_or_none(decision),
+                    action_id,
                     self._json_or_none(action),
                     self._json_or_none(error),
                 ),
@@ -168,6 +171,8 @@ class AuditRepository:
 
     def complete_run(self, run_id: str, result: RunResult) -> None:
         """Persist the final aggregate result for an existing run."""
+        if result.run_id != run_id:
+            raise ValueError("The result run_id does not match the run being completed.")
         with self._transaction() as connection:
             cursor = connection.execute(
                 """
@@ -276,3 +281,15 @@ class AuditRepository:
             if number:
                 return str(number)
         return None
+
+    @staticmethod
+    def _action_id(action: Any) -> str | None:
+        if action is None:
+            return None
+        if isinstance(action, Mapping):
+            action_id = action.get("action_id")
+        else:
+            action_id = getattr(action, "action_id", None)
+        if not action_id:
+            raise ValueError("Action evidence needs a persisted action_id.")
+        return str(action_id)

@@ -144,6 +144,31 @@ def test_unknown_run_or_invoice_returns_none(tmp_path: Path):
     assert repository.get_invoice_trace("missing-run", "INV-100") is None
 
 
+def test_complete_run_rejects_mismatched_result_identity_without_mutating_run(tmp_path: Path):
+    """Serializing a result under another run would make audit identities contradictory."""
+    database_path = tmp_path / "audit.sqlite3"
+    repository = AuditRepository(database_path)
+    repository.initialize()
+    run_id = repository.start_run(_request(database_path))
+    mismatched_result = RunResult(
+        run_id="different-run",
+        exit_code=1,
+        manifest={"processed": 0},
+        traces=[],
+        validation_issues=[],
+        errors=[],
+        output_dir=tmp_path / "outputs" / "different-run",
+    )
+
+    with pytest.raises(ValueError, match="does not match"):
+        repository.complete_run(run_id, mismatched_result)
+
+    with sqlite3.connect(database_path) as connection:
+        assert connection.execute(
+            "SELECT completed_at, result_json, exit_code FROM runs WHERE run_id = ?", (run_id,)
+        ).fetchone() == (None, None, None)
+
+
 def test_idempotency_key_is_stable_and_changes_with_logical_action_inputs():
     """Dropping any key input would incorrectly reuse a different action."""
     baseline = compute_action_key(
@@ -204,6 +229,42 @@ def test_record_action_preserves_existing_logical_action(tmp_path: Path):
     assert repository.find_action_by_key(key) == first
     with sqlite3.connect(database_path) as connection:
         assert connection.execute("SELECT COUNT(*) FROM actions").fetchone()[0] == 1
+
+
+def test_invoice_trace_requires_a_persisted_action_and_round_trips_its_evidence(tmp_path: Path):
+    """An unrecorded action ID would make a trace claim a fabricated action occurred."""
+    database_path = tmp_path / "audit.sqlite3"
+    repository = AuditRepository(database_path)
+    repository.initialize()
+    run_id = repository.start_run(_request(database_path))
+    action = ActionResult(
+        action_id="action-1",
+        idempotency_key=compute_action_key(
+            "file-sha-256", date(2026, 4, 1), "INV-100", ReminderStage.FIRST, "v1"
+        ),
+        intended_action=IntendedAction.READY_TO_SEND,
+        artifact_path=Path("emails/simulated_send/INV-100.eml"),
+        action_reused=False,
+    )
+
+    with pytest.raises(sqlite3.IntegrityError):
+        repository.record_invoice(
+            run_id=run_id,
+            record=_record(),
+            eligibility=_eligibility(),
+            action=action,
+        )
+
+    assert repository.get_invoice_trace(run_id, "INV-100") is None
+    repository.record_action(action)
+    repository.record_invoice(
+        run_id=run_id,
+        record=_record(),
+        eligibility=_eligibility(),
+        action=action,
+    )
+
+    assert repository.get_invoice_trace(run_id, "INV-100")["action"] == action.model_dump(mode="json")
 
 
 def test_invoice_write_for_missing_run_rolls_back_and_enforces_foreign_keys(tmp_path: Path):
