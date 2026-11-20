@@ -1,3 +1,4 @@
+import json
 from datetime import UTC, datetime
 from decimal import Decimal
 from pathlib import Path
@@ -202,3 +203,59 @@ def test_unresolved_source_message_ids_are_retained_on_ambiguous_assessment(clas
 
     assert assessment.classification.value == "ambiguous"
     assert assessment.source_message_ids == ["unresolved-1", "unresolved-2"]
+
+
+@pytest.mark.parametrize(
+    ("case", "error"),
+    [
+        ("missing_version", "missing vocabulary key: version"),
+        ("unsupported_version", "unsupported vocabulary version"),
+        ("missing_phrase", "missing phrase classes: dispute_or_query"),
+        ("phrase_not_list", "phrases.payment_promised must be a list of strings"),
+        ("phrase_not_string", "phrases.payment_promised must be a list of strings"),
+        ("missing_summary", "missing summary labels: ambiguous"),
+        ("summary_not_string", "summary_labels.ambiguous must be a string"),
+    ],
+)
+def test_classifier_rejects_valid_json_with_invalid_vocabulary_schema(
+    tmp_path, case, error
+):
+    vocabulary = json.loads(VOCABULARY_PATH.read_text())
+    if case == "missing_version":
+        vocabulary.pop("version")
+    elif case == "unsupported_version":
+        vocabulary["version"] = "2.0"
+    elif case == "missing_phrase":
+        vocabulary["phrases"].pop("dispute_or_query")
+    elif case == "phrase_not_list":
+        vocabulary["phrases"]["payment_promised"] = "we will pay"
+    elif case == "phrase_not_string":
+        vocabulary["phrases"]["payment_promised"] = ["we will pay", 3]
+    elif case == "missing_summary":
+        vocabulary["summary_labels"].pop("ambiguous")
+    else:
+        vocabulary["summary_labels"]["ambiguous"] = 3
+    invalid_path = tmp_path / f"invalid-{case}.json"
+    invalid_path.write_text(json.dumps(vocabulary))
+
+    with pytest.raises((ValueError, TypeError), match=error):
+        RuleBasedResponseClassifier(invalid_path)
+
+
+@pytest.mark.parametrize(
+    ("section", "replacement", "error"),
+    [
+        ("phrases", [], "phrases must be an object"),
+        ("summary_labels", [], "summary_labels must be an object"),
+    ],
+)
+def test_classifier_rejects_valid_json_with_invalid_vocabulary_section_type(
+    tmp_path, section, replacement, error
+):
+    vocabulary = json.loads(VOCABULARY_PATH.read_text())
+    vocabulary[section] = replacement
+    invalid_path = tmp_path / f"invalid-{section}.json"
+    invalid_path.write_text(json.dumps(vocabulary))
+
+    with pytest.raises((ValueError, TypeError), match=error):
+        RuleBasedResponseClassifier(invalid_path)

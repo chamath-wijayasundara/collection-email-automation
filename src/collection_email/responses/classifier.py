@@ -20,6 +20,8 @@ _PRECEDENCE = (
     ResponseClassification.PAYMENT_PROMISED,
     ResponseClassification.DOCUMENT_REQUEST,
 )
+_SUPPORTED_VOCABULARY_VERSIONS = {"1.0"}
+_REQUIRED_SUMMARY_LABELS = {classification.value for classification in ResponseClassification}
 _QUOTE_MARKER = re.compile(r"^\s*on .+ wrote:\s*$", re.IGNORECASE)
 _PUNCTUATION = re.compile(r"[^\w\s]")
 _ISO_DATE = re.compile(r"\b(\d{4})-(\d{2})-(\d{2})\b")
@@ -108,9 +110,7 @@ class RuleBasedResponseClassifier:
 
     def __init__(self, vocabulary_path: Path):
         vocabulary = json.loads(vocabulary_path.read_text())
-        self.version = str(vocabulary["version"])
-        self._phrases: Mapping[str, list[str]] = vocabulary["phrases"]
-        self._summaries: Mapping[str, str] = vocabulary["summary_labels"]
+        self.version, self._phrases, self._summaries = _validate_vocabulary(vocabulary)
 
     def assess(self, match: MatchResult) -> ResponseAssessment:
         """Return one conservative deterministic assessment for a matched thread."""
@@ -231,3 +231,46 @@ class RuleBasedResponseClassifier:
             source_message_ids=source_message_ids,
             match_reason=match.match_reason,
         )
+
+
+def _validate_vocabulary(
+    vocabulary: object,
+) -> tuple[str, Mapping[str, list[str]], Mapping[str, str]]:
+    if not isinstance(vocabulary, Mapping):
+        raise TypeError("vocabulary must be an object")
+
+    _require_keys(vocabulary, {"version", "phrases", "summary_labels"}, "vocabulary")
+    version = vocabulary["version"]
+    if not isinstance(version, str) or version not in _SUPPORTED_VOCABULARY_VERSIONS:
+        raise ValueError("unsupported vocabulary version")
+
+    phrases = vocabulary["phrases"]
+    if not isinstance(phrases, Mapping):
+        raise TypeError("phrases must be an object")
+    required_phrase_classes = {classification.value for classification in _PRECEDENCE}
+    missing_phrase_classes = sorted(required_phrase_classes - set(phrases))
+    if missing_phrase_classes:
+        raise ValueError(f"missing phrase classes: {', '.join(missing_phrase_classes)}")
+    for classification, values in phrases.items():
+        if not isinstance(classification, str) or not (
+            isinstance(values, list) and all(isinstance(value, str) for value in values)
+        ):
+            raise TypeError(f"phrases.{classification} must be a list of strings")
+
+    summaries = vocabulary["summary_labels"]
+    if not isinstance(summaries, Mapping):
+        raise TypeError("summary_labels must be an object")
+    missing_summary_labels = sorted(_REQUIRED_SUMMARY_LABELS - set(summaries))
+    if missing_summary_labels:
+        raise ValueError(f"missing summary labels: {', '.join(missing_summary_labels)}")
+    for classification, summary in summaries.items():
+        if not isinstance(classification, str) or not isinstance(summary, str):
+            raise TypeError(f"summary_labels.{classification} must be a string")
+
+    return version, phrases, summaries
+
+
+def _require_keys(vocabulary: Mapping[object, object], keys: set[str], section: str) -> None:
+    missing_keys = sorted(keys - set(vocabulary))
+    if missing_keys:
+        raise ValueError(f"missing {section} key: {', '.join(missing_keys)}")
