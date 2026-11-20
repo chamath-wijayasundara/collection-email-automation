@@ -65,13 +65,13 @@ class RunService:
         """Read workbook evidence without creating runs, actions, or output files."""
         return read_workbook(Path(input_path), as_of_override=as_of_override)
 
-    def inspect(self, run_id: str, document_number: str) -> dict[str, Any] | None:
-        """Return persisted evidence for one row in a completed or active run."""
+    def inspect(self, run_id: str, trace_reference: str) -> dict[str, Any] | None:
+        """Return evidence by document number or unique ``source-row-N`` trace ID."""
         if self._repository is None:
             if self._database_path is None:
                 raise ValueError("RunService needs a database path before inspection.")
             self._repository = self._repository_factory(self._database_path)
-        return self._repository.get_invoice_trace(run_id, document_number)
+        return self._repository.get_invoice_trace(run_id, trace_reference)
 
     def run(self, request: RunRequest) -> RunResult:
         """Run the complete dry-run workflow, isolating unexpected row failures."""

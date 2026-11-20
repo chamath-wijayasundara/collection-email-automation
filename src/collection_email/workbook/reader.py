@@ -7,7 +7,7 @@ from decimal import Decimal, InvalidOperation
 from pathlib import Path
 from typing import Any
 from xml.etree.ElementTree import ParseError
-from zipfile import BadZipFile
+from zipfile import BadZipFile, ZipFile
 
 from openpyxl import load_workbook
 from openpyxl.utils.exceptions import InvalidFileException
@@ -42,6 +42,14 @@ FIELD_NAMES = (
     "aging_bucket",
 )
 EMAIL_PATTERN = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
+REQUIRED_OOXML_PARTS = frozenset(
+    {
+        "[Content_Types].xml",
+        "_rels/.rels",
+        "xl/workbook.xml",
+        "xl/_rels/workbook.xml.rels",
+    }
+)
 
 
 def fingerprint_file(path: Path) -> str:
@@ -110,6 +118,13 @@ def read_workbook(path: Path, as_of_override: date | None = None) -> WorkbookRea
 
 def _read_workbook(path: Path, as_of_override: date | None = None) -> WorkbookReadResult:
     """Read validated workbook content after its file can be opened."""
+    with ZipFile(path) as package:
+        missing_parts = sorted(REQUIRED_OOXML_PARTS.difference(package.namelist()))
+    if missing_parts:
+        raise FileValidationError(
+            "Workbook is missing required OOXML package parts: " + ", ".join(missing_parts)
+        )
+
     formula_book = load_workbook(path, data_only=False)
     value_book = load_workbook(path, data_only=True)
     if "AR_Data" not in formula_book.sheetnames:

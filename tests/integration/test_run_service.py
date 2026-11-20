@@ -5,6 +5,7 @@ import json
 import shutil
 import sqlite3
 from pathlib import Path
+from zipfile import ZIP_DEFLATED, ZipFile
 
 from openpyxl import load_workbook
 
@@ -219,3 +220,61 @@ def test_invalid_row_keeps_raw_source_envelope_in_database_inspect_and_csv(tmp_p
         row = next(row for row in csv.DictReader(source) if row["document_number"] == "INV-INVALID-EVIDENCE")
     assert json.loads(row["raw_values"])["Document Number"] == "INV-INVALID-EVIDENCE"
     assert "invalid_email" in row["validation_issue_codes"]
+
+
+def test_duplicate_invalid_rows_complete_with_distinct_inspectable_source_traces(tmp_path: Path):
+    """Duplicate raw document evidence must not collide or leave an unfinished run."""
+    workbook = tmp_path / "duplicate-invalid.xlsx"
+    with ZipFile(WORKBOOK) as source_zip:
+        members = {
+            member.filename: source_zip.read(member.filename)
+            for member in source_zip.infolist()
+        }
+    original_cell = b'<c r="C3" s="2" t="s"><v>12</v></c>'
+    duplicate_cell = b'<c r="C3" s="2" t="s"><v>9</v></c>'
+    assert members["xl/worksheets/sheet1.xml"].count(original_cell) == 1
+    members["xl/worksheets/sheet1.xml"] = members["xl/worksheets/sheet1.xml"].replace(
+        original_cell, duplicate_cell
+    )
+    with ZipFile(workbook, "w", ZIP_DEFLATED) as destination_zip:
+        for filename, content in members.items():
+            destination_zip.writestr(filename, content)
+    request = _request(tmp_path).model_copy(update={"input_path": workbook})
+    service = RunService()
+
+    result = service.run(request)
+    first = service.inspect(result.run_id, "source-row-2")
+    second = service.inspect(result.run_id, "source-row-3")
+
+    assert result.exit_code == 0
+    assert result.manifest["counts"]["traces"] == 300
+    assert result.manifest["counts"]["invalid"] == 2
+    assert first is not None
+    assert second is not None
+    assert first["eligibility"]["source_row"] == 2
+    assert second["eligibility"]["source_row"] == 3
+    assert first["eligibility"]["status"] == second["eligibility"]["status"] == "invalid"
+    assert first["source_envelope"]["raw_values"]["Document Number"] == "INV-2026-10001"
+    assert second["source_envelope"]["raw_values"]["Document Number"] == "INV-2026-10001"
+    assert first["action"] is second["action"] is None
+
+    with sqlite3.connect(request.database_path) as connection:
+        assert connection.execute(
+            "SELECT COUNT(*) FROM invoice_traces WHERE run_id = ?", (result.run_id,)
+        ).fetchone()[0] == 300
+        assert connection.execute(
+            "SELECT completed_at IS NOT NULL, exit_code FROM runs WHERE run_id = ?",
+            (result.run_id,),
+        ).fetchone() == (1, 0)
+
+    with (result.output_dir / "ignored_records.csv").open(newline="", encoding="utf-8") as source:
+        duplicate_rows = [
+            row
+            for row in csv.DictReader(source)
+            if row["document_number"] == "INV-2026-10001"
+        ]
+    assert [row["source_row"] for row in duplicate_rows] == ["2", "3"]
+    assert all(
+        json.loads(row["raw_values"])["Document Number"] == "INV-2026-10001"
+        for row in duplicate_rows
+    )

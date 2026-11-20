@@ -89,6 +89,23 @@ def test_validate_maps_malformed_ooxml_xml_to_exit_two(tmp_path: Path):
     assert "Unable to parse workbook" in result.output
 
 
+def test_validate_maps_missing_ooxml_content_types_part_to_exit_two(tmp_path: Path):
+    """A ZIP missing its OOXML package manifest remains a concise file-level failure."""
+    workbook = tmp_path / "missing-content-types.xlsx"
+    with ZipFile(WORKBOOK) as source_zip, ZipFile(
+        workbook, "w", ZIP_DEFLATED
+    ) as destination_zip:
+        for member in source_zip.infolist():
+            if member.filename != "[Content_Types].xml":
+                destination_zip.writestr(member, source_zip.read(member.filename))
+
+    result = CliRunner().invoke(app, ["validate", "--input", str(workbook)])
+
+    assert result.exit_code == 2
+    assert "ERROR:" in result.output
+    assert "required OOXML package parts" in result.output
+
+
 def test_run_maps_invalid_utf8_mailbox_to_exit_two(tmp_path: Path):
     """A decoder failure in external fixture data belongs to CLI exit code two."""
     mailbox = tmp_path / "mailbox.json"

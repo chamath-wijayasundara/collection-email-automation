@@ -108,7 +108,10 @@ def run(
 @app.command()
 def inspect(
     run_id: Annotated[str, typer.Option("--run-id", help="Completed run identifier.")],
-    invoice: Annotated[str, typer.Option("--invoice", help="Invoice document number.")],
+    invoice: Annotated[
+        str,
+        typer.Option("--invoice", help="Invoice number or source-row-N trace ID."),
+    ],
     database: Annotated[Path, typer.Option("--database", help="SQLite audit database path.")],
 ) -> None:
     """Print persisted evidence for one invoice in one run."""

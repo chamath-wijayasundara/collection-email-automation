@@ -112,6 +112,7 @@ class AuditRepository:
             """
             CREATE TABLE IF NOT EXISTS invoice_traces (
                 run_id TEXT NOT NULL REFERENCES runs(run_id),
+                trace_id TEXT NOT NULL,
                 document_number TEXT NOT NULL,
                 record_json TEXT CHECK(record_json IS NULL OR json_valid(record_json)),
                 eligibility_json TEXT CHECK(eligibility_json IS NULL OR json_valid(eligibility_json)),
@@ -122,7 +123,7 @@ class AuditRepository:
                 action_json TEXT CHECK(action_json IS NULL OR json_valid(action_json)),
                 error_json TEXT CHECK(error_json IS NULL OR json_valid(error_json)),
                 source_envelope_json TEXT CHECK(source_envelope_json IS NULL OR json_valid(source_envelope_json)),
-                PRIMARY KEY (run_id, document_number)
+                PRIMARY KEY (run_id, trace_id)
             )
             """,
         )
@@ -136,6 +137,8 @@ class AuditRepository:
                     "ALTER TABLE invoice_traces ADD COLUMN source_envelope_json TEXT "
                     "CHECK(source_envelope_json IS NULL OR json_valid(source_envelope_json))"
                 )
+            if not self._has_column(connection, "invoice_traces", "trace_id"):
+                self._migrate_invoice_traces_add_source_identity(connection)
 
     @staticmethod
     def _has_column(connection: sqlite3.Connection, table: str, column: str) -> bool:
@@ -175,6 +178,52 @@ class AuditRepository:
         )
         connection.execute("DROP TABLE invoice_traces_legacy")
 
+    @staticmethod
+    def _migrate_invoice_traces_add_source_identity(connection: sqlite3.Connection) -> None:
+        """Replace document-keyed traces with stable per-source-row identities."""
+        connection.execute("ALTER TABLE invoice_traces RENAME TO invoice_traces_document_keyed")
+        connection.execute(
+            """
+            CREATE TABLE invoice_traces (
+                run_id TEXT NOT NULL REFERENCES runs(run_id),
+                trace_id TEXT NOT NULL,
+                document_number TEXT NOT NULL,
+                record_json TEXT CHECK(record_json IS NULL OR json_valid(record_json)),
+                eligibility_json TEXT CHECK(eligibility_json IS NULL OR json_valid(eligibility_json)),
+                match_json TEXT CHECK(match_json IS NULL OR json_valid(match_json)),
+                response_json TEXT CHECK(response_json IS NULL OR json_valid(response_json)),
+                decision_json TEXT CHECK(decision_json IS NULL OR json_valid(decision_json)),
+                action_id TEXT REFERENCES actions(action_id),
+                action_json TEXT CHECK(action_json IS NULL OR json_valid(action_json)),
+                error_json TEXT CHECK(error_json IS NULL OR json_valid(error_json)),
+                source_envelope_json TEXT CHECK(source_envelope_json IS NULL OR json_valid(source_envelope_json)),
+                PRIMARY KEY (run_id, trace_id)
+            )
+            """
+        )
+        connection.execute(
+            """
+            INSERT INTO invoice_traces (
+                run_id, trace_id, document_number, record_json, eligibility_json, match_json,
+                response_json, decision_json, action_id, action_json, error_json,
+                source_envelope_json
+            )
+            SELECT run_id,
+                   CASE
+                       WHEN json_extract(eligibility_json, '$.source_row') IS NOT NULL
+                           THEN 'source-row-' || json_extract(eligibility_json, '$.source_row')
+                       WHEN json_extract(record_json, '$.source_row') IS NOT NULL
+                           THEN 'source-row-' || json_extract(record_json, '$.source_row')
+                       ELSE document_number
+                   END,
+                   document_number, record_json, eligibility_json, match_json,
+                   response_json, decision_json, action_id, action_json, error_json,
+                   source_envelope_json
+            FROM invoice_traces_document_keyed
+            """
+        )
+        connection.execute("DROP TABLE invoice_traces_document_keyed")
+
     def start_run(self, request: RunRequest) -> str:
         """Start a run and return its opaque identifier."""
         run_id = str(uuid.uuid4())
@@ -198,24 +247,29 @@ class AuditRepository:
         source_envelope: Any = None,
         *,
         document_number: str | None = None,
+        trace_id: str | None = None,
     ) -> None:
         """Append a single immutable invoice trace to an existing run."""
         document_number = document_number or self._document_number(record, eligibility)
         if not document_number:
             raise ValueError("An invoice trace needs a document number.")
+        trace_id = trace_id or self._source_trace_id(record, eligibility, source_envelope)
+        if not trace_id:
+            trace_id = document_number
         action_id = self._action_id(action)
 
         with self._transaction() as connection:
             connection.execute(
                 """
                 INSERT INTO invoice_traces (
-                    run_id, document_number, record_json, eligibility_json, match_json,
+                    run_id, trace_id, document_number, record_json, eligibility_json, match_json,
                     response_json, decision_json, action_id, action_json, error_json,
                     source_envelope_json
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     run_id,
+                    trace_id,
                     document_number,
                     self._json_or_none(record),
                     self._json_or_none(eligibility),
@@ -296,8 +350,8 @@ class AuditRepository:
                 ),
             )
 
-    def get_invoice_trace(self, run_id: str, document_number: str) -> dict[str, Any] | None:
-        """Return stored evidence for an invoice, or ``None`` if it was not recorded."""
+    def get_invoice_trace(self, run_id: str, trace_reference: str) -> dict[str, Any] | None:
+        """Return evidence by unique source trace ID or by document number."""
         connection = self._connect()
         try:
             row = connection.execute(
@@ -305,9 +359,11 @@ class AuditRepository:
                 SELECT record_json, eligibility_json, match_json, response_json,
                        decision_json, action_json, error_json, source_envelope_json
                 FROM invoice_traces
-                WHERE run_id = ? AND document_number = ?
+                WHERE run_id = ? AND (trace_id = ? OR document_number = ?)
+                ORDER BY CASE WHEN trace_id = ? THEN 0 ELSE 1 END, trace_id
+                LIMIT 1
                 """,
-                (run_id, document_number),
+                (run_id, trace_reference, trace_reference, trace_reference),
             ).fetchone()
         finally:
             connection.close()
@@ -341,6 +397,17 @@ class AuditRepository:
                 number = getattr(value, "document_number", None)
             if number:
                 return str(number)
+        return None
+
+    @staticmethod
+    def _source_trace_id(*values: Any) -> str | None:
+        for value in values:
+            if isinstance(value, Mapping):
+                source_row = value.get("source_row")
+            else:
+                source_row = getattr(value, "source_row", None)
+            if source_row is not None:
+                return f"source-row-{source_row}"
         return None
 
     @staticmethod

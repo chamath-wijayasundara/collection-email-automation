@@ -251,6 +251,19 @@ def test_malformed_workbook_xml_is_a_file_validation_error(tmp_path):
         read_workbook(path)
 
 
+def test_zip_without_required_content_types_part_is_a_file_validation_error(tmp_path):
+    """A ZIP-shaped file missing the OOXML manifest must not leak a package KeyError."""
+    source = write_workbook(tmp_path)
+    path = tmp_path / "missing-content-types.xlsx"
+    with ZipFile(source) as source_zip, ZipFile(path, "w", ZIP_DEFLATED) as destination_zip:
+        for member in source_zip.infolist():
+            if member.filename != "[Content_Types].xml":
+                destination_zip.writestr(member, source_zip.read(member.filename))
+
+    with pytest.raises(FileValidationError, match="required OOXML package parts"):
+        read_workbook(path)
+
+
 def test_formula_backed_duplicate_document_numbers_are_invalid(tmp_path):
     path = write_workbook(tmp_path)
     append_row(path, valid_row(document_number='=" INV-DUP "'))
