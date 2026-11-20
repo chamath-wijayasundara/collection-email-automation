@@ -112,6 +112,7 @@ def read_workbook(path: Path, as_of_override: date | None = None) -> WorkbookRea
     assert effective_as_of_date is not None
 
     records: list[RecordEnvelope] = []
+    normalized_document_numbers: dict[int, str | None] = {}
     for source_row, (formula_values, cached_values) in enumerate(
         zip(
             formula_book["AR_Data"].iter_rows(min_row=2, values_only=True),
@@ -131,6 +132,7 @@ def read_workbook(path: Path, as_of_override: date | None = None) -> WorkbookRea
             normalized[field] = _normalized_string(values[field])
             if normalized[field] is None:
                 issues.append(_issue("required_value_missing", f"{field} is required", source_row, field))
+        normalized_document_numbers[source_row] = normalized["document_number"]
 
         amount = _as_decimal(values["amount"])
         if amount is None:
@@ -184,7 +186,7 @@ def read_workbook(path: Path, as_of_override: date | None = None) -> WorkbookRea
 
     document_rows: dict[str, list[RecordEnvelope]] = {}
     for envelope in records:
-        document_number = _normalized_string(envelope.raw_values["Document Number"])
+        document_number = normalized_document_numbers[envelope.source_row]
         if document_number is not None:
             document_rows.setdefault(document_number, []).append(envelope)
     for duplicate_rows in document_rows.values():
@@ -217,7 +219,7 @@ def read_workbook(path: Path, as_of_override: date | None = None) -> WorkbookRea
 
     return WorkbookReadResult(
         file_fingerprint=fingerprint_file(path),
-        source_as_of_date=source_as_of_date or effective_as_of_date,
+        source_as_of_date=source_as_of_date,
         effective_as_of_date=effective_as_of_date,
         as_of_source="override" if as_of_override else "workbook",
         source_row_count=len(records),

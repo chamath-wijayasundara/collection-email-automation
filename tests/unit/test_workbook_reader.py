@@ -1,5 +1,6 @@
 from datetime import date
 from pathlib import Path
+from zipfile import ZIP_DEFLATED, ZipFile
 
 import pytest
 from openpyxl import Workbook, load_workbook
@@ -167,8 +168,37 @@ def test_override_allows_missing_control_date_without_invalidating_source_aging(
 
     result = read_workbook(path, date(2026, 3, 27))
 
+    assert result.source_as_of_date is None
     assert result.valid_records[0].source_aging_days == 4
     assert result.valid_records[0].effective_aging_days == 6
+
+
+def test_formula_backed_duplicate_document_numbers_are_invalid(tmp_path):
+    path = write_workbook(tmp_path)
+    append_row(path, valid_row(document_number='=" INV-DUP "'))
+    append_row(path, valid_row(document_number='="INV-DUP"', customer_name="Other Ltd"))
+    with ZipFile(path) as source_zip:
+        sheet_xml = source_zip.read("xl/worksheets/sheet1.xml")
+        members = {member.filename: source_zip.read(member.filename) for member in source_zip.infolist()}
+    sheet_xml = sheet_xml.replace(
+        b'<c r="C2"><f>" INV-DUP "</f><v /></c>',
+        b'<c r="C2" t="str"><f>" INV-DUP "</f><v> INV-DUP </v></c>',
+    ).replace(
+        b'<c r="C3"><f>"INV-DUP"</f><v /></c>',
+        b'<c r="C3" t="str"><f>"INV-DUP"</f><v>INV-DUP</v></c>',
+    )
+    members["xl/worksheets/sheet1.xml"] = sheet_xml
+    with ZipFile(path, "w", ZIP_DEFLATED) as destination_zip:
+        for filename, content in members.items():
+            destination_zip.writestr(filename, content)
+
+    result = read_workbook(path)
+
+    assert result.valid_records == []
+    assert [record.issues[0].code for record in result.records] == [
+        "duplicate_document_number",
+        "duplicate_document_number",
+    ]
 
 
 def test_supplied_workbook_has_expected_valid_source_rows():

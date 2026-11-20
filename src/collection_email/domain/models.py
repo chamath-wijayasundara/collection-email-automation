@@ -53,7 +53,7 @@ class WorkbookReadResult(BaseModel):
     """All evidence returned while reading an AR workbook."""
 
     file_fingerprint: str
-    source_as_of_date: date
+    source_as_of_date: date | None
     effective_as_of_date: date
     as_of_source: str
     source_row_count: int
