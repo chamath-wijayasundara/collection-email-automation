@@ -2,7 +2,7 @@
 
 import inspect
 import json
-from datetime import date
+from datetime import UTC, date, datetime, timedelta, timezone
 from decimal import Decimal
 from email.parser import BytesParser
 from email.policy import SMTP
@@ -42,6 +42,10 @@ def _decision(action: IntendedAction = IntendedAction.READY_TO_SEND) -> Decision
         reason="A test decision.",
         intended_action=action,
     )
+
+
+def _composition_time() -> datetime:
+    return datetime(2026, 3, 25, 12, 30, tzinfo=UTC)
 
 
 def test_executor_writes_only_dry_run_eml_inside_current_run(tmp_path: Path):
@@ -106,8 +110,8 @@ def test_executor_rejects_a_prior_action_with_a_different_idempotency_key(tmp_pa
 
 
 def test_executor_eml_bytes_are_deterministic_for_identical_evidence(tmp_path: Path):
-    """A generated MIME boundary must not make identical dry-run evidence drift."""
-    executor = DryRunExecutor()
+    """A fixed composition clock must produce byte-identical new dry-run evidence."""
+    executor = DryRunExecutor(clock=lambda: _composition_time())
     first = executor.execute(
         _rendered(), _decision(), tmp_path / "first", "same-run", "INV-100", "key-100"
     )
@@ -119,8 +123,8 @@ def test_executor_eml_bytes_are_deterministic_for_identical_evidence(tmp_path: P
 
 
 def test_executor_eml_has_deterministic_rfc_from_and_date_headers(tmp_path: Path):
-    """An RFC-shaped artifact needs identity and date evidence without a live mail service."""
-    executor = DryRunExecutor()
+    """An RFC-shaped artifact needs a truthful, parseable UTC composition date."""
+    executor = DryRunExecutor(clock=lambda: _composition_time())
     action = executor.execute(
         _rendered(), _decision(), tmp_path / "run", "same-run", "INV-100", "key-100"
     )
@@ -130,8 +134,27 @@ def test_executor_eml_has_deterministic_rfc_from_and_date_headers(tmp_path: Path
     parsed = BytesParser(policy=SMTP).parsebytes(action.artifact_path.read_bytes())
 
     assert parsed["From"] == "collection-automation@offline.invalid"
-    assert parsed["Date"] is not None
+    assert parsed["Date"].datetime == _composition_time()
     assert repeated.artifact_path.read_bytes() == action.artifact_path.read_bytes()
+
+
+def test_executor_normalizes_an_aware_clock_value_to_utc(tmp_path: Path):
+    """A non-UTC but aware composition clock must retain the instant in the RFC date."""
+    local_time = datetime(2026, 3, 25, 13, 30, tzinfo=timezone(timedelta(hours=1)))
+    action = DryRunExecutor(clock=lambda: local_time).execute(
+        _rendered(), _decision(), tmp_path / "run", "run", "INV-100", "key-100"
+    )
+    parsed = BytesParser(policy=SMTP).parsebytes(action.artifact_path.read_bytes())
+
+    assert parsed["Date"].datetime == _composition_time()
+
+
+def test_executor_rejects_naive_composition_clock_values(tmp_path: Path):
+    """A timezone-naive clock could silently emit an incorrect RFC date."""
+    with pytest.raises(ValueError, match="timezone-aware"):
+        DryRunExecutor(clock=lambda: datetime(2026, 3, 25, 12, 30)).execute(
+            _rendered(), _decision(), tmp_path / "run", "run", "INV-100", "key-100"
+        )
 
 
 @pytest.mark.parametrize("failure_point", ["fsync", "replace"])

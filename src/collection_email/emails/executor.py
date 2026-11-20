@@ -4,7 +4,8 @@ import os
 import shutil
 import tempfile
 import uuid
-from datetime import UTC, datetime, timedelta
+from collections.abc import Callable
+from datetime import UTC, datetime
 from email.message import EmailMessage
 from email.policy import SMTP
 from email.utils import format_datetime
@@ -20,6 +21,9 @@ OFFLINE_ASSESSMENT_SENDER = "collection-automation@offline.invalid"
 
 class DryRunExecutor:
     """Write local ``.eml`` evidence; this class has no delivery capability."""
+
+    def __init__(self, clock: Callable[[], datetime] | None = None) -> None:
+        self._clock = clock or _now_utc
 
     def execute(
         self,
@@ -78,8 +82,7 @@ class DryRunExecutor:
             return Path(destination) / "emails" / "drafts"
         raise ValueError("Only ready_to_send and drafted_for_review actions create email artifacts.")
 
-    @staticmethod
-    def _message(rendered: RenderedEmail, run_id: str, document_number: str) -> EmailMessage:
+    def _message(self, rendered: RenderedEmail, run_id: str, document_number: str) -> EmailMessage:
         for name, value in {
             "recipient address": rendered.to_address,
             "subject": rendered.subject,
@@ -93,7 +96,7 @@ class DryRunExecutor:
         message["From"] = OFFLINE_ASSESSMENT_SENDER
         message["To"] = rendered.to_address
         message["Subject"] = rendered.subject
-        message["Date"] = _offline_evidence_date(run_id, document_number)
+        message["Date"] = _format_composition_date(self._clock())
         message["X-Collection-Automation-Mode"] = "DRY-RUN"
         message["X-Collection-Automation-Run-ID"] = run_id
         message["X-Collection-Automation-Invoice"] = document_number
@@ -154,9 +157,12 @@ class DryRunExecutor:
             temporary_path.unlink(missing_ok=True)
 
 
-def _offline_evidence_date(run_id: str, document_number: str) -> str:
-    """Return a reproducible RFC 5322 date without consulting a clock or network."""
-    evidence = f"{run_id}\x00{document_number}".encode()
-    offset_seconds = int(sha256(evidence).hexdigest()[:12], 16) % (20 * 365 * 24 * 60 * 60)
-    timestamp = datetime(2020, 1, 1, tzinfo=UTC) + timedelta(seconds=offset_seconds)
-    return format_datetime(timestamp)
+def _now_utc() -> datetime:
+    return datetime.now(UTC)
+
+
+def _format_composition_date(timestamp: datetime) -> str:
+    """Format an actual timezone-aware composition time as an RFC 5322 UTC date."""
+    if timestamp.tzinfo is None or timestamp.utcoffset() is None:
+        raise ValueError("Dry-run composition clock must return a timezone-aware datetime.")
+    return format_datetime(timestamp.astimezone(UTC))
