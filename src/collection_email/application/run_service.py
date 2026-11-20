@@ -75,6 +75,7 @@ class RunService:
 
     def run(self, request: RunRequest) -> RunResult:
         """Run the complete dry-run workflow, isolating unexpected row failures."""
+        started_at = datetime.now(UTC)
         workbook = self.validate(request.input_path, request.as_of_override)
         mailbox = load_mailbox_fixture(request.mailbox_path)
 
@@ -98,6 +99,7 @@ class RunService:
         for envelope, eligibility in zip(workbook.records, eligibility_results, strict=True):
             trace = {
                 "record": self._json_model(envelope.record),
+                "source_envelope": self._json_model(envelope),
                 "eligibility": self._json_model(eligibility),
                 "match": None,
                 "response": None,
@@ -115,6 +117,7 @@ class RunService:
                     eligibility=eligibility,
                     decision=trace["decision"],
                     document_number=document_number,
+                    source_envelope=trace["source_envelope"],
                 )
                 traces.append(trace)
                 continue
@@ -159,12 +162,13 @@ class RunService:
                     decision=trace["decision"],
                     error=error_evidence,
                     document_number=document_number,
+                    source_envelope=trace["source_envelope"],
                 )
             traces.append(trace)
 
         validation_issues = [*workbook.issues, *workbook.observations, *mailbox.issues]
         manifest = self._manifest(
-            workbook, request, traces, validation_issues, per_record_errors
+            workbook, request, traces, validation_issues, per_record_errors, started_at
         )
         result = RunResult(
             run_id=run_id,
@@ -208,6 +212,8 @@ class RunService:
             record.document_number,
             eligibility.stage,
             rendered.template_version,
+            mailbox_evidence={"match": match, "response": response},
+            rendered_content=rendered,
         )
         prior_action = repository.find_action_by_key(action_key)
         action = self._executor.execute(
@@ -231,6 +237,7 @@ class RunService:
             response=trace["response"],
             decision=trace["decision"],
             action=trace["action"],
+            source_envelope=trace["source_envelope"],
         )
 
     @staticmethod
@@ -244,6 +251,7 @@ class RunService:
         traces: list[dict[str, Any]],
         validation_issues: list[Any],
         errors: list[dict[str, Any]],
+        started_at: datetime,
     ) -> dict[str, Any]:
         counts = {
             "traces": len(traces),
@@ -271,6 +279,7 @@ class RunService:
         return {
             "input_path": str(request.input_path),
             "mailbox_path": str(request.mailbox_path),
+            "mailbox_fingerprint": self._file_fingerprint(request.mailbox_path),
             "file_fingerprint": workbook.file_fingerprint,
             "as_of_date": workbook.effective_as_of_date.isoformat(),
             "as_of_source": workbook.as_of_source,
@@ -278,6 +287,21 @@ class RunService:
                 workbook.source_as_of_date.isoformat() if workbook.source_as_of_date else None
             ),
             "template_version": self._template_version,
+            "application_version": self._application_version(),
+            "started_at": started_at.isoformat(),
             "completed_at": datetime.now(UTC).isoformat(),
+            "arguments": request.model_dump(mode="json"),
             "counts": counts,
         }
+
+    @staticmethod
+    def _file_fingerprint(path: Path) -> str:
+        import hashlib
+
+        return hashlib.sha256(Path(path).read_bytes()).hexdigest()
+
+    @staticmethod
+    def _application_version() -> str:
+        from collection_email import __version__
+
+        return __version__

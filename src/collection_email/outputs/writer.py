@@ -23,6 +23,7 @@ _ELIGIBILITY_HEADERS = [
     "reason_code",
     "reason",
 ]
+_IGNORED_HEADERS = [*_ELIGIBILITY_HEADERS, "raw_values", "validation_issue_codes"]
 _VALIDATION_HEADERS = ["source_row", "field", "code", "severity", "message"]
 _RESPONSE_HEADERS = [
     "source_row",
@@ -88,7 +89,18 @@ class OutputWriter:
             if eligibility.get("status") == "eligible" and stage in stage_rows:
                 stage_rows[stage].append(eligibility_row)
             elif eligibility.get("status") in {"ignored", "invalid"}:
-                ignored_rows.append(eligibility_row)
+                envelope = _mapping(trace.get("source_envelope"))
+                ignored_rows.append(
+                    {
+                        **eligibility_row,
+                        "raw_values": envelope.get("raw_values", {}),
+                        "validation_issue_codes": [
+                            issue.get("code", "")
+                            for issue in envelope.get("issues", [])
+                            if isinstance(issue, Mapping)
+                        ],
+                    }
+                )
 
             response = _mapping(trace.get("response"))
             if response:
@@ -125,7 +137,7 @@ class OutputWriter:
         self._write_csv(root / "validation_issues.csv", _VALIDATION_HEADERS, validation_rows)
         for stage, filename in _STAGE_FILES.items():
             self._write_csv(root / filename, _ELIGIBILITY_HEADERS, stage_rows[stage])
-        self._write_csv(root / "ignored_records.csv", _ELIGIBILITY_HEADERS, ignored_rows)
+        self._write_csv(root / "ignored_records.csv", _IGNORED_HEADERS, ignored_rows)
         self._write_csv(root / "response_assessments.csv", _RESPONSE_HEADERS, response_rows)
         self._write_csv(root / "actions.csv", _ACTION_HEADERS, action_rows)
         self._write_csv(root / "errors.csv", _ERROR_HEADERS, errors)
@@ -275,6 +287,9 @@ def _json_safe(value: Any) -> Any:
 def _csv_value(value: Any) -> Any:
     if value is None:
         return ""
-    if isinstance(value, list):
+    if isinstance(value, (list, tuple, Mapping)):
         return json.dumps(_json_safe(value), ensure_ascii=False, separators=(",", ":"))
-    return _json_safe(value)
+    normalized = _json_safe(value)
+    if isinstance(normalized, str) and normalized.lstrip(" \t\r\n").startswith(("=", "+", "-", "@")):
+        return f"'{normalized}"
+    return normalized

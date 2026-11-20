@@ -54,7 +54,13 @@
     "recipients": ["collections@example.test"],
     "subject": "Undeliverable: INV-2026-10015",
     "body": "Delivery failed because the recipient address is invalid.",
-    "received_at": "2026-03-25T09:30:00Z"
+    "received_at": "2026-03-25T09:30:00Z",
+    "in_reply_to": "outgoing-INV-2026-10015",
+    "delivery_status": {
+      "original_message_id": "outgoing-INV-2026-10015",
+      "original_recipient": "ar@everestsolutionsllc.example.com",
+      "document_number": "INV-2026-10015"
+    }
   },
   {
     "message_id": "no-meaningful-response-1",

@@ -27,6 +27,8 @@ def message(
     subject="General question",
     body="Hello",
     thread_id=None,
+    in_reply_to=None,
+    delivery_status=None,
     received_at="2026-03-25T09:00:00Z",
 ):
     return EmailMessage(
@@ -36,6 +38,8 @@ def message(
         subject=subject,
         body=body,
         thread_id=thread_id,
+        in_reply_to=in_reply_to,
+        delivery_status=delivery_status,
         received_at=datetime.fromisoformat(received_at).astimezone(UTC),
     )
 
@@ -88,6 +92,68 @@ def test_body_document_match_follows_subject_priority():
     assert [item.message_id for item in result.messages] == ["body-match"]
     assert result.match_reason == "body_document_and_sender"
     assert result.strength == "strong"
+
+
+def test_subject_and_later_body_matches_are_unioned_deduplicated_and_ordered():
+    """Returning at the subject tier would hide a later reply that changes classification."""
+    target = record()
+    messages = [
+        message(
+            "later-body",
+            subject="Re: account update",
+            body="We will pay INV-100 on 27 March 2026.",
+            thread_id="thread-b",
+            received_at="2026-03-25T11:00:00Z",
+        ),
+        message(
+            "both-earliest",
+            subject="Re: INV-100",
+            body="Question about INV-100",
+            thread_id="thread-a",
+            received_at="2026-03-25T08:00:00Z",
+        ),
+        message(
+            "subject-middle",
+            subject="Re: INV-100",
+            body="We are checking this.",
+            thread_id="thread-a",
+            received_at="2026-03-25T09:00:00Z",
+        ),
+    ]
+
+    result = match_responses(target, [target], messages)
+
+    assert [item.message_id for item in result.messages] == [
+        "both-earliest",
+        "subject-middle",
+        "later-body",
+    ]
+    assert result.match_reason == "subject_document_and_sender"
+    assert result.strength == "strong"
+
+
+def test_validated_delivery_status_metadata_defensibly_links_a_bounce():
+    """A DSN may come from a daemon, but its validated original recipient links the invoice."""
+    target = record()
+    bounce = message(
+        "bounce-1",
+        sender="mailer-daemon@example.test",
+        subject="Undeliverable: INV-100",
+        body="Delivery failed because the recipient address is invalid.",
+        in_reply_to="outgoing-INV-100",
+        delivery_status={
+            "original_message_id": "outgoing-INV-100",
+            "original_recipient": "ar@acme.example.test",
+            "document_number": "INV-100",
+        },
+    )
+
+    result = match_responses(target, [target], [bounce])
+
+    assert [item.message_id for item in result.messages] == ["bounce-1"]
+    assert result.match_reason == "validated_delivery_status"
+    assert result.strength == "strong"
+    assert result.requires_ambiguous_assessment is False
 
 
 def test_document_match_from_wrong_sender_is_ambiguous():

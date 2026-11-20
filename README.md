@@ -68,7 +68,8 @@ review; the second shows a normal initial-reminder/no-response case:
   --invoice INV-2026-10204
 ```
 
-`inspect` prints the normalized input, eligibility, match evidence, response
+`inspect` prints the normalized input, raw source envelope (including linked
+validation issues for invalid rows), eligibility, match evidence, response
 assessment, review decision, final dry-run action, and its artifact path. An
 unknown invoice/run trace exits with status 1.
 
@@ -112,9 +113,12 @@ under `drafts` require human review. Every artifact has an
 `X-Collection-Automation-Mode: DRY-RUN` header.
 
 Runs are idempotent by the input fingerprint, effective as-of date, invoice,
-stage, and template version. Repeating the exact run records a new run
-directory, copies the existing `.eml` artifact into it, and reuses the one
-logical action rather than creating a duplicate.
+stage, template version, matched mailbox evidence, response assessment, and
+rendered content. Repeating identical evidence records a new run directory,
+copies the existing `.eml` artifact into it, and reuses one logical action.
+Changing a matched reply or its rendered draft creates a new action rather than
+copying stale evidence. `manifest.json` records the application version, run
+start/completion times, mailbox fingerprint, and complete normalized arguments.
 
 ## Data rules and assumptions
 
@@ -132,11 +136,19 @@ records are preserved as evidence rather than silently removed.
 
 `fixtures/mailbox_responses.json` is a JSON array of synthetic messages.
 Normal entries contain `message_id`, optional `thread_id`, `sender`,
-`recipients`, `subject`, `body`, `received_at`, and optional `in_reply_to`.
+`recipients`, `subject`, `body`, timezone-aware `received_at`, and optional
+`in_reply_to`. Synthetic delivery-status notifications additionally contain a
+validated `delivery_status` object with the original message ID, recipient, and
+document number; this defensibly associates a mailbox-daemon bounce with its
+invoice.
 It demonstrates each deterministic response classification, a multi-message
 thread, ambiguous/wrong-invoice/sender-only cases, and one malformed entry.
 That malformed entry is isolated into `validation_issues.csv`; valid fixture
 entries and invoice processing continue.
+
+CSV evidence is formula-neutralized when a text cell begins with `=`, `+`,
+`-`, or `@`, so opening exported evidence in a spreadsheet does not evaluate
+input-controlled formulas.
 
 Matching is intentionally conservative. An exact invoice reference plus the
 customer sender is strong evidence; sender-only evidence is ambiguous and

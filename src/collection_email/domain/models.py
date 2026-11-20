@@ -1,11 +1,11 @@
 """Pydantic contracts shared by collection workflow modules."""
 
-from datetime import date, datetime
+from datetime import UTC, date, datetime
 from decimal import Decimal
 from pathlib import Path
 from typing import Any, Literal
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from collection_email.domain.enums import (
     EligibilityStatus,
@@ -74,6 +74,16 @@ class EligibilityResult(BaseModel):
     reason: str
 
 
+class DeliveryStatusMetadata(BaseModel):
+    """Validated linkage from a synthetic delivery-status notification."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    original_message_id: str = Field(min_length=1)
+    original_recipient: str = Field(min_length=1)
+    document_number: str = Field(min_length=1)
+
+
 class EmailMessage(BaseModel):
     """A normalized synthetic mailbox message."""
 
@@ -85,6 +95,15 @@ class EmailMessage(BaseModel):
     body: str
     received_at: datetime
     in_reply_to: str | None = None
+    delivery_status: DeliveryStatusMetadata | None = None
+
+    @field_validator("received_at")
+    @classmethod
+    def normalize_received_at(cls, value: datetime) -> datetime:
+        """Require an unambiguous instant and use UTC for ordering and audit."""
+        if value.tzinfo is None or value.utcoffset() is None:
+            raise ValueError("received_at must be timezone-aware")
+        return value.astimezone(UTC)
 
 
 class MailboxLoadResult(BaseModel):

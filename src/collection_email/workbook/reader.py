@@ -6,6 +6,7 @@ from datetime import date, datetime
 from decimal import Decimal, InvalidOperation
 from pathlib import Path
 from typing import Any
+from xml.etree.ElementTree import ParseError
 from zipfile import BadZipFile
 
 from openpyxl import load_workbook
@@ -77,9 +78,10 @@ def _as_decimal(value: object) -> Decimal | None:
     if value is None or isinstance(value, bool):
         return None
     try:
-        return Decimal(str(value))
+        number = Decimal(str(value))
     except (InvalidOperation, ValueError):
         return None
+    return number if number.is_finite() else None
 
 
 def _as_int(value: object) -> int | None:
@@ -88,6 +90,8 @@ def _as_int(value: object) -> int | None:
     try:
         number = Decimal(str(value))
     except (InvalidOperation, ValueError):
+        return None
+    if not number.is_finite():
         return None
     if number != number.to_integral_value():
         return None
@@ -98,6 +102,8 @@ def read_workbook(path: Path, as_of_override: date | None = None) -> WorkbookRea
     """Read the required workbook structure and control date."""
     try:
         return _read_workbook(path, as_of_override)
+    except ParseError as error:
+        raise FileValidationError(f"Unable to parse workbook XML: {path}") from error
     except (OSError, BadZipFile, InvalidFileException) as error:
         raise FileValidationError(f"Unable to open workbook: {path}") from error
 
@@ -144,9 +150,12 @@ def _read_workbook(path: Path, as_of_override: date | None = None) -> WorkbookRe
                 issues.append(_issue("required_value_missing", f"{field} is required", source_row, field))
         normalized_document_numbers[source_row] = normalized["document_number"]
 
-        amount = _as_decimal(values["amount"])
-        if amount is None:
+        amount_value = values["amount"]
+        amount = _as_decimal(amount_value)
+        if amount_value is None:
             issues.append(_issue("required_value_missing", "amount is required", source_row, "amount"))
+        elif amount is None:
+            issues.append(_issue("invalid_amount", "amount must be a finite decimal", source_row, "amount"))
         elif amount < 0:
             issues.append(_issue("negative_amount", "amount must not be negative", source_row, "amount"))
 
@@ -159,12 +168,24 @@ def _read_workbook(path: Path, as_of_override: date | None = None) -> WorkbookRe
         if issue_date is not None and due_date is not None and issue_date > due_date:
             issues.append(_issue("issue_date_after_due_date", "issue_date must not be after due_date", source_row, "issue_date"))
 
-        source_aging_days = _as_int(values["aging_days"])
-        if source_aging_days is None:
+        aging_value = values["aging_days"]
+        source_aging_days = _as_int(aging_value)
+        if aging_value is None:
             issues.append(_issue("required_value_missing", "aging_days is required", source_row, "aging_days"))
+        elif source_aging_days is None:
+            issues.append(
+                _issue(
+                    "invalid_aging_days",
+                    "aging_days must be a finite integer",
+                    source_row,
+                    "aging_days",
+                )
+            )
         elif source_aging_days < 0:
             issues.append(_issue("negative_aging_days", "aging_days must not be negative", source_row, "aging_days"))
         elif (
+            as_of_override is None
+            and
             source_as_of_date is not None
             and due_date is not None
             and source_aging_days != max((source_as_of_date - due_date).days, 0)

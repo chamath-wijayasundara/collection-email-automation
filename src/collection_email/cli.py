@@ -124,6 +124,7 @@ def inspect(
     typer.echo(f"Invoice: {invoice}")
     for label, key in (
         ("Normalized input", "record"),
+        ("Source envelope", "source_envelope"),
         ("Eligibility", "eligibility"),
         ("Match evidence", "match"),
         ("Response assessment", "response"),

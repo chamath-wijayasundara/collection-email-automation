@@ -17,7 +17,7 @@ def load_mailbox_fixture(path: Path) -> MailboxLoadResult:
     """Load valid messages while reporting malformed entries independently."""
     try:
         payload = json.loads(path.read_text())
-    except (OSError, json.JSONDecodeError) as error:
+    except (OSError, UnicodeDecodeError, json.JSONDecodeError) as error:
         raise FileValidationError(f"Unable to read mailbox fixture: {path}") from error
 
     if not isinstance(payload, list):

@@ -178,6 +178,7 @@ def test_initialize_is_repeatable_and_round_trips_invoice_evidence(tmp_path: Pat
         "decision": _decision().model_dump(mode="json"),
         "action": None,
         "error": None,
+        "source_envelope": None,
     }
 
 
@@ -240,6 +241,27 @@ def test_idempotency_key_is_stable_and_changes_with_logical_action_inputs():
     )
     assert baseline != compute_action_key(
         "file-sha-256", date(2026, 4, 1), "INV-100", ReminderStage.FIRST, "v2"
+    )
+
+
+def test_idempotency_key_includes_matched_mailbox_evidence_and_rendered_content():
+    """A reply or draft change must create a new logical action, not copy stale evidence."""
+    common = ("file-sha-256", date(2026, 4, 1), "INV-100", ReminderStage.FIRST, "v1")
+    baseline = compute_action_key(
+        *common,
+        mailbox_evidence={"message_id": "reply-1", "body": "We will pay on 2026-04-03."},
+        rendered_content={"subject": "Reminder", "text_body": "Pay by 2026-04-03."},
+    )
+
+    assert baseline == compute_action_key(
+        *common,
+        mailbox_evidence={"body": "We will pay on 2026-04-03.", "message_id": "reply-1"},
+        rendered_content={"text_body": "Pay by 2026-04-03.", "subject": "Reminder"},
+    )
+    assert baseline != compute_action_key(
+        *common,
+        mailbox_evidence={"message_id": "reply-1", "body": "We will pay on 2026-04-04."},
+        rendered_content={"subject": "Reminder", "text_body": "Pay by 2026-04-04."},
     )
 
 
@@ -365,3 +387,45 @@ def test_invoice_write_for_missing_run_rolls_back_and_enforces_foreign_keys(tmp_
         )
 
     assert repository.get_invoice_trace("missing-run", "INV-100") is None
+
+
+def test_trace_migrates_and_round_trips_invalid_source_envelope(tmp_path: Path):
+    """Invalid rows need their raw fields and linked validation evidence after migration."""
+    database_path = tmp_path / "audit.sqlite3"
+    _create_legacy_database(database_path)
+    repository = AuditRepository(database_path)
+    repository.initialize()
+    run_id = repository.start_run(_request(database_path))
+    envelope = {
+        "source_row": 7,
+        "raw_values": {"Document Number": "INV-BAD", "Customer Email": "not-an-email"},
+        "record": None,
+        "issues": [
+            {
+                "code": "invalid_email",
+                "message": "customer_email must be a valid email address",
+                "severity": "error",
+                "source_row": 7,
+                "field": "customer_email",
+            }
+        ],
+    }
+    eligibility = EligibilityResult(
+        source_row=7,
+        document_number="INV-BAD",
+        status=EligibilityStatus.INVALID,
+        stage=ReminderStage.NONE,
+        reason_code="invalid_source_row",
+        reason="The source row has validation issues.",
+    )
+
+    repository.record_invoice(
+        run_id,
+        eligibility=eligibility,
+        source_envelope=envelope,
+    )
+
+    trace = repository.get_invoice_trace(run_id, "INV-BAD")
+    assert trace is not None
+    assert trace["record"] is None
+    assert trace["source_envelope"] == envelope

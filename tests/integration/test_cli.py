@@ -1,6 +1,7 @@
 """Command-line contracts for the offline collection assessment workflow."""
 
 from pathlib import Path
+from zipfile import ZIP_DEFLATED, ZipFile
 
 from typer.testing import CliRunner
 
@@ -66,6 +67,40 @@ def test_validate_maps_file_level_failure_to_exit_two(tmp_path: Path):
     assert result.exit_code == 2
     assert "ERROR:" in result.output
     assert "Unable to open workbook" in result.output
+
+
+def test_validate_maps_malformed_ooxml_xml_to_exit_two(tmp_path: Path):
+    """Malformed XML inside a ZIP workbook must be a concise input failure."""
+    workbook = tmp_path / "malformed.xlsx"
+    with ZipFile(WORKBOOK) as source_zip:
+        members = {
+            member.filename: source_zip.read(member.filename)
+            for member in source_zip.infolist()
+        }
+    members["xl/worksheets/sheet1.xml"] = b"<worksheet><broken>"
+    with ZipFile(workbook, "w", ZIP_DEFLATED) as destination_zip:
+        for filename, content in members.items():
+            destination_zip.writestr(filename, content)
+
+    result = CliRunner().invoke(app, ["validate", "--input", str(workbook)])
+
+    assert result.exit_code == 2
+    assert "ERROR:" in result.output
+    assert "Unable to parse workbook" in result.output
+
+
+def test_run_maps_invalid_utf8_mailbox_to_exit_two(tmp_path: Path):
+    """A decoder failure in external fixture data belongs to CLI exit code two."""
+    mailbox = tmp_path / "mailbox.json"
+    mailbox.write_bytes(b"[\xff]")
+    args = _run_args(tmp_path)
+    args[args.index(str(MAILBOX))] = str(mailbox)
+
+    result = CliRunner().invoke(app, args)
+
+    assert result.exit_code == 2
+    assert "ERROR:" in result.output
+    assert "Unable to read mailbox fixture" in result.output
 
 
 def test_as_of_requires_canonical_iso_date():
@@ -139,6 +174,7 @@ def test_inspect_prints_persisted_invoice_evidence_and_unknown_is_one(tmp_path: 
 
     assert inspected.exit_code == 0
     assert "Normalized input:" in inspected.output
+    assert "Source envelope:" in inspected.output
     assert "Eligibility:" in inspected.output
     assert "Match evidence:" in inspected.output
     assert "Response assessment:" in inspected.output

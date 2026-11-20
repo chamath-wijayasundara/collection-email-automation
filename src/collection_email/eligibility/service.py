@@ -16,12 +16,23 @@ def _result(
 ) -> EligibilityResult:
     return EligibilityResult(
         source_row=envelope.source_row,
-        document_number=envelope.record.document_number if envelope.record is not None else None,
+        document_number=_document_number(envelope),
         status=status,
         stage=stage,
         reason_code=reason_code,
         reason=reason,
     )
+
+
+def _document_number(envelope: RecordEnvelope) -> str | None:
+    """Retain a parseable raw identifier when validation prevents an AR record."""
+    if envelope.record is not None:
+        return envelope.record.document_number
+    value = envelope.raw_values.get("Document Number")
+    if not isinstance(value, str):
+        return None
+    normalized = value.strip()
+    return normalized or None
 
 
 def classify_eligibility(envelope: RecordEnvelope) -> EligibilityResult:

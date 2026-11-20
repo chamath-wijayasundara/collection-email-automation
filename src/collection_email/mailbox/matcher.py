@@ -23,6 +23,20 @@ def _ordered(messages: Sequence[EmailMessage]) -> list[EmailMessage]:
     return sorted(messages, key=lambda message: (message.received_at, message.message_id))
 
 
+def _deduplicated(messages: Sequence[EmailMessage]) -> list[EmailMessage]:
+    return list({message.message_id: message for message in messages}.values())
+
+
+def _is_valid_delivery_status(message: EmailMessage, record: ARRecord) -> bool:
+    status = message.delivery_status
+    return (
+        status is not None
+        and message.in_reply_to == status.original_message_id
+        and _normalize_email(status.original_recipient) == _normalize_email(record.customer_email)
+        and status.document_number.casefold() == record.document_number.casefold()
+    )
+
+
 def _result(
     messages: Sequence[EmailMessage],
     match_reason: str,
@@ -54,20 +68,29 @@ def match_responses(
 
     customer_email = _normalize_email(record.customer_email)
     sender_matches = [message for message in messages if _normalize_email(message.sender) == customer_email]
+    delivery_status_matches = [
+        message for message in messages if _is_valid_delivery_status(message, record)
+    ]
 
     subject_matches = [
         message for message in sender_matches if _contains_document(message.subject, record.document_number)
     ]
-    if subject_matches:
-        return _result(subject_matches, "subject_document_and_sender", "strong")
-
     body_matches = [
         message
         for message in sender_matches
         if _contains_document(message.body, record.document_number)
     ]
-    if body_matches:
-        return _result(body_matches, "body_document_and_sender", "strong")
+    strong_matches = _deduplicated(
+        [*delivery_status_matches, *subject_matches, *body_matches]
+    )
+    if strong_matches:
+        if delivery_status_matches:
+            reason = "validated_delivery_status"
+        elif subject_matches:
+            reason = "subject_document_and_sender"
+        else:
+            reason = "body_document_and_sender"
+        return _result(strong_matches, reason, "strong")
 
     document_matches = [
         message

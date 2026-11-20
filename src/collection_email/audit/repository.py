@@ -41,10 +41,21 @@ def compute_action_key(
     document_number: str,
     stage: ReminderStage,
     template_version: str,
+    *,
+    mailbox_evidence: Any = None,
+    rendered_content: Any = None,
 ) -> str:
-    """Return the stable SHA-256 identity of one logical simulated action."""
+    """Return the stable identity of an action's source evidence and rendered content."""
     payload = _canonical_json(
-        [file_fingerprint, as_of_date.isoformat(), document_number, stage.value, template_version]
+        {
+            "workbook_fingerprint": file_fingerprint,
+            "as_of_date": as_of_date.isoformat(),
+            "document_number": document_number,
+            "stage": stage.value,
+            "template_version": template_version,
+            "mailbox_evidence": mailbox_evidence,
+            "rendered_content": rendered_content,
+        }
     )
     return hashlib.sha256(payload.encode("utf-8")).hexdigest()
 
@@ -110,6 +121,7 @@ class AuditRepository:
                 action_id TEXT REFERENCES actions(action_id),
                 action_json TEXT CHECK(action_json IS NULL OR json_valid(action_json)),
                 error_json TEXT CHECK(error_json IS NULL OR json_valid(error_json)),
+                source_envelope_json TEXT CHECK(source_envelope_json IS NULL OR json_valid(source_envelope_json)),
                 PRIMARY KEY (run_id, document_number)
             )
             """,
@@ -119,6 +131,11 @@ class AuditRepository:
                 connection.execute(statement)
             if not self._has_column(connection, "invoice_traces", "action_id"):
                 self._migrate_invoice_traces_add_action_reference(connection)
+            if not self._has_column(connection, "invoice_traces", "source_envelope_json"):
+                connection.execute(
+                    "ALTER TABLE invoice_traces ADD COLUMN source_envelope_json TEXT "
+                    "CHECK(source_envelope_json IS NULL OR json_valid(source_envelope_json))"
+                )
 
     @staticmethod
     def _has_column(connection: sqlite3.Connection, table: str, column: str) -> bool:
@@ -178,6 +195,7 @@ class AuditRepository:
         decision: Any = None,
         action: Any = None,
         error: Any = None,
+        source_envelope: Any = None,
         *,
         document_number: str | None = None,
     ) -> None:
@@ -192,8 +210,9 @@ class AuditRepository:
                 """
                 INSERT INTO invoice_traces (
                     run_id, document_number, record_json, eligibility_json, match_json,
-                    response_json, decision_json, action_id, action_json, error_json
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    response_json, decision_json, action_id, action_json, error_json,
+                    source_envelope_json
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     run_id,
@@ -206,6 +225,7 @@ class AuditRepository:
                     action_id,
                     self._json_or_none(action),
                     self._json_or_none(error),
+                    self._json_or_none(source_envelope),
                 ),
             )
 
@@ -283,7 +303,7 @@ class AuditRepository:
             row = connection.execute(
                 """
                 SELECT record_json, eligibility_json, match_json, response_json,
-                       decision_json, action_json, error_json
+                       decision_json, action_json, error_json, source_envelope_json
                 FROM invoice_traces
                 WHERE run_id = ? AND document_number = ?
                 """,
@@ -301,6 +321,7 @@ class AuditRepository:
             "decision": self._load_json(row["decision_json"]),
             "action": self._load_json(row["action_json"]),
             "error": self._load_json(row["error_json"]),
+            "source_envelope": self._load_json(row["source_envelope_json"]),
         }
 
     @staticmethod

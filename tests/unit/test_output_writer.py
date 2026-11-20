@@ -1,5 +1,6 @@
 """Contract tests for offline email artifacts and assessor-facing outputs."""
 
+import csv
 import inspect
 import json
 from datetime import UTC, date, datetime, timedelta, timezone
@@ -344,3 +345,19 @@ def test_output_writer_creates_complete_stable_contract_and_truthful_counts(tmp_
     assert manifest["counts"]["eligible"] == 1
     assert manifest["counts"]["traces"] == 1
     assert manifest["as_of_date"] == "2026-03-25"
+
+
+def test_csv_values_that_spreadsheet_apps_interpret_as_formulas_are_neutralized(tmp_path: Path):
+    """Raw evidence must remain visible without becoming an executable CSV formula."""
+    destination = tmp_path / "evidence.csv"
+
+    OutputWriter._write_csv(
+        destination,
+        ["value"],
+        [{"value": "=HYPERLINK(\"https://unsafe.example\")"}, {"value": "+1+1"}],
+    )
+
+    with destination.open(newline="", encoding="utf-8") as source:
+        rows = list(csv.DictReader(source))
+    assert rows[0]["value"].startswith("'=HYPERLINK")
+    assert rows[1]["value"] == "'+1+1"
