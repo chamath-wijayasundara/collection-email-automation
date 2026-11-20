@@ -1,0 +1,24 @@
+{
+  "version": "1.0",
+  "phrases": {
+    "bounce_or_invalid_contact": ["delivery failed", "undeliverable", "recipient address is invalid", "invalid recipient", "address is invalid"],
+    "out_of_office": ["out of office", "out of the office", "automatic reply", "auto reply"],
+    "dispute_or_query": ["we dispute", "dispute the", "disputed", "need this investigated", "query about", "question about"],
+    "payment_already_made": ["payment has already been made", "payment already made", "we have already paid", "payment was made", "payment sent"],
+    "partial_payment": ["paid part", "partial payment", "partially paid", "part payment"],
+    "payment_promised": ["we will pay", "will pay", "payment will be made", "promise to pay"],
+    "document_request": ["send a copy of the invoice", "copy of the invoice", "send the invoice", "send a statement", "purchase order", "supporting documents"]
+  },
+  "summary_labels": {
+    "no_response": "No matched customer response.",
+    "bounce_or_invalid_contact": "Delivery failure or invalid recipient reported.",
+    "out_of_office": "Out-of-office reply received.",
+    "dispute_or_query": "Customer reported a dispute or query.",
+    "payment_already_made": "Customer reports payment has already been made.",
+    "partial_payment": "Customer reports a partial payment.",
+    "payment_promised": "Customer promises payment on {payment_date}.",
+    "document_request": "Customer requested supporting documents.",
+    "no_meaningful_response": "No actionable customer response.",
+    "ambiguous": "Response is ambiguous and requires review."
+  }
+}
