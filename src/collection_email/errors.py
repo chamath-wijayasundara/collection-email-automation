@@ -7,3 +7,7 @@ class FileValidationError(Exception):
 
 class MissingResponseAssessmentError(Exception):
     """An eligible invoice reached decisioning without response evidence."""
+
+
+class InvalidEmailHeaderError(Exception):
+    """A value intended for an email header contains an unsafe line break."""

@@ -16,6 +16,7 @@ from collection_email.domain.models import (
     ResponseAssessment,
 )
 from collection_email.emails.renderer import EmailRenderer
+from collection_email.errors import InvalidEmailHeaderError
 
 TEMPLATE_DIR = Path(__file__).parents[2] / "src/collection_email/emails/templates"
 
@@ -110,3 +111,22 @@ def test_response_summary_is_added_only_to_review_drafts():
     assert "Customer says &lt;payment pending&gt;." in draft.html_body
     assert "Customer says <payment pending>." not in simulated_send.text_body
     assert "payment pending" not in simulated_send.html_body
+
+
+@pytest.mark.parametrize(
+    ("field", "value"),
+    [
+        ("document_number", "INV-100\r\nBcc: attacker@example.test"),
+        ("customer_email", "ar@acme.example.test\nBcc: attacker@example.test"),
+    ],
+)
+def test_header_bound_record_values_reject_crlf(field, value):
+    unsafe_record = record().model_copy(update={field: value})
+
+    with pytest.raises(InvalidEmailHeaderError, match="CR or LF"):
+        EmailRenderer(TEMPLATE_DIR, "test-v1").render(
+            unsafe_record,
+            eligibility(ReminderStage.INITIAL),
+            response(),
+            decision(IntendedAction.READY_TO_SEND),
+        )

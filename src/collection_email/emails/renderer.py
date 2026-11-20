@@ -12,6 +12,7 @@ from collection_email.domain.models import (
     RenderedEmail,
     ResponseAssessment,
 )
+from collection_email.errors import InvalidEmailHeaderError
 
 _SUBJECTS = {
     "initial": "Initial reminder: invoice {document_number} is overdue",
@@ -50,6 +51,8 @@ class EmailRenderer:
     ) -> RenderedEmail:
         """Return a rendered email artifact; this method never performs delivery."""
         stage = eligibility.stage.value
+        _validate_header_value("document number", record.document_number)
+        _validate_header_value("recipient address", record.customer_email)
         context = {
             "customer_name": record.customer_name,
             "document_number": record.document_number,
@@ -59,6 +62,7 @@ class EmailRenderer:
             "response_context": response.summary if decision.human_review_needed else None,
         }
         subject = _SUBJECTS[stage].format(document_number=record.document_number)
+        _validate_header_value("subject", subject)
         return RenderedEmail(
             to_address=record.customer_email,
             subject=subject,
@@ -71,3 +75,8 @@ class EmailRenderer:
 
 def _format_amount(amount: Decimal) -> str:
     return f"{amount.quantize(Decimal('0.01'), rounding=ROUND_HALF_UP):,.2f}"
+
+
+def _validate_header_value(name: str, value: str) -> None:
+    if "\r" in value or "\n" in value:
+        raise InvalidEmailHeaderError(f"{name} must not contain CR or LF characters.")
