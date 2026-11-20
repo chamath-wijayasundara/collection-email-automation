@@ -4,14 +4,18 @@ import os
 import shutil
 import tempfile
 import uuid
+from datetime import UTC, datetime, timedelta
 from email.message import EmailMessage
 from email.policy import SMTP
+from email.utils import format_datetime
 from hashlib import sha256
 from pathlib import Path
 
 from collection_email.domain.enums import IntendedAction
 from collection_email.domain.models import ActionResult, DecisionResult, RenderedEmail
 from collection_email.errors import InvalidEmailHeaderError
+
+OFFLINE_ASSESSMENT_SENDER = "collection-automation@offline.invalid"
 
 
 class DryRunExecutor:
@@ -86,8 +90,10 @@ class DryRunExecutor:
                 raise InvalidEmailHeaderError(f"{name} must not contain CR or LF characters.")
 
         message = EmailMessage(policy=SMTP)
+        message["From"] = OFFLINE_ASSESSMENT_SENDER
         message["To"] = rendered.to_address
         message["Subject"] = rendered.subject
+        message["Date"] = _offline_evidence_date(run_id, document_number)
         message["X-Collection-Automation-Mode"] = "DRY-RUN"
         message["X-Collection-Automation-Run-ID"] = run_id
         message["X-Collection-Automation-Invoice"] = document_number
@@ -123,12 +129,17 @@ class DryRunExecutor:
 
     @staticmethod
     def _atomic_write(path: Path, content: bytes) -> None:
-        with tempfile.NamedTemporaryFile(dir=path.parent, delete=False) as temporary:
-            temporary.write(content)
-            temporary.flush()
-            os.fsync(temporary.fileno())
-            temporary_path = Path(temporary.name)
-        os.replace(temporary_path, path)
+        temporary_path: Path | None = None
+        try:
+            with tempfile.NamedTemporaryFile(dir=path.parent, delete=False) as temporary:
+                temporary_path = Path(temporary.name)
+                temporary.write(content)
+                temporary.flush()
+                os.fsync(temporary.fileno())
+            os.replace(temporary_path, path)
+        finally:
+            if temporary_path is not None:
+                temporary_path.unlink(missing_ok=True)
 
     @classmethod
     def _atomic_copy(cls, source: Path, destination: Path) -> None:
@@ -141,3 +152,11 @@ class DryRunExecutor:
             os.replace(temporary_path, destination)
         finally:
             temporary_path.unlink(missing_ok=True)
+
+
+def _offline_evidence_date(run_id: str, document_number: str) -> str:
+    """Return a reproducible RFC 5322 date without consulting a clock or network."""
+    evidence = f"{run_id}\x00{document_number}".encode()
+    offset_seconds = int(sha256(evidence).hexdigest()[:12], 16) % (20 * 365 * 24 * 60 * 60)
+    timestamp = datetime(2020, 1, 1, tzinfo=UTC) + timedelta(seconds=offset_seconds)
+    return format_datetime(timestamp)

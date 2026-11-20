@@ -209,29 +209,39 @@ class OutputWriter:
 
     @classmethod
     def _write_csv(cls, path: Path, headers: list[str], rows: Sequence[Mapping[str, Any]]) -> None:
-        with tempfile.NamedTemporaryFile(
-            mode="w", encoding="utf-8", newline="", dir=path.parent, delete=False
-        ) as temporary:
-            writer = csv.DictWriter(temporary, fieldnames=headers, extrasaction="ignore")
-            writer.writeheader()
-            for row in rows:
-                writer.writerow({key: _csv_value(row.get(key, "")) for key in headers})
-            temporary.flush()
-            os.fsync(temporary.fileno())
-            temporary_path = Path(temporary.name)
-        os.replace(temporary_path, path)
+        temporary_path: Path | None = None
+        try:
+            with tempfile.NamedTemporaryFile(
+                mode="w", encoding="utf-8", newline="", dir=path.parent, delete=False
+            ) as temporary:
+                temporary_path = Path(temporary.name)
+                writer = csv.DictWriter(temporary, fieldnames=headers, extrasaction="ignore")
+                writer.writeheader()
+                for row in rows:
+                    writer.writerow({key: _csv_value(row.get(key, "")) for key in headers})
+                temporary.flush()
+                os.fsync(temporary.fileno())
+            os.replace(temporary_path, path)
+        finally:
+            if temporary_path is not None:
+                temporary_path.unlink(missing_ok=True)
 
     @staticmethod
     def _write_json(path: Path, value: Mapping[str, Any]) -> None:
         payload = json.dumps(
             _json_safe(value), ensure_ascii=False, allow_nan=False, separators=(",", ":"), sort_keys=True
         ).encode("utf-8")
-        with tempfile.NamedTemporaryFile(dir=path.parent, delete=False) as temporary:
-            temporary.write(payload)
-            temporary.flush()
-            os.fsync(temporary.fileno())
-            temporary_path = Path(temporary.name)
-        os.replace(temporary_path, path)
+        temporary_path: Path | None = None
+        try:
+            with tempfile.NamedTemporaryFile(dir=path.parent, delete=False) as temporary:
+                temporary_path = Path(temporary.name)
+                temporary.write(payload)
+                temporary.flush()
+                os.fsync(temporary.fileno())
+            os.replace(temporary_path, path)
+        finally:
+            if temporary_path is not None:
+                temporary_path.unlink(missing_ok=True)
 
 
 def _mapping(value: Any) -> dict[str, Any]:

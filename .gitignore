@@ -7,6 +7,6 @@ __pycache__/
 .coverage
 htmlcov/
 *.py[cod]
-outputs/
+/outputs/
 dist/
 *.egg-info/

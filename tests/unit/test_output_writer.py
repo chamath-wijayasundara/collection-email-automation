@@ -4,10 +4,15 @@ import inspect
 import json
 from datetime import date
 from decimal import Decimal
+from email.parser import BytesParser
+from email.policy import SMTP
 from pathlib import Path
+from typing import Self
 
 import pytest
 
+import collection_email.emails.executor as executor_module
+import collection_email.outputs.writer as writer_module
 from collection_email.domain.enums import IntendedAction, ReminderStage
 from collection_email.domain.models import (
     ActionResult,
@@ -111,6 +116,140 @@ def test_executor_eml_bytes_are_deterministic_for_identical_evidence(tmp_path: P
     )
 
     assert first.artifact_path.read_bytes() == second.artifact_path.read_bytes()
+
+
+def test_executor_eml_has_deterministic_rfc_from_and_date_headers(tmp_path: Path):
+    """An RFC-shaped artifact needs identity and date evidence without a live mail service."""
+    executor = DryRunExecutor()
+    action = executor.execute(
+        _rendered(), _decision(), tmp_path / "run", "same-run", "INV-100", "key-100"
+    )
+    repeated = executor.execute(
+        _rendered(), _decision(), tmp_path / "repeat", "same-run", "INV-100", "key-100"
+    )
+    parsed = BytesParser(policy=SMTP).parsebytes(action.artifact_path.read_bytes())
+
+    assert parsed["From"] == "collection-automation@offline.invalid"
+    assert parsed["Date"] is not None
+    assert repeated.artifact_path.read_bytes() == action.artifact_path.read_bytes()
+
+
+@pytest.mark.parametrize("failure_point", ["fsync", "replace"])
+def test_executor_removes_temporary_eml_when_atomic_finalization_fails(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, failure_point: str
+):
+    """A failed email fsync or replacement must not leave partial evidence behind."""
+    monkeypatch.setattr(executor_module.os, failure_point, _raise_atomic_failure)
+    destination = tmp_path / "run"
+
+    with pytest.raises(OSError, match="atomic failure"):
+        DryRunExecutor().execute(
+            _rendered(), _decision(), destination, "run", "INV-100", "key-100"
+        )
+
+    assert list((destination / "emails" / "simulated_send").iterdir()) == []
+
+
+def test_executor_removes_temporary_eml_when_write_fails(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    """A failed email write must not leave partial evidence behind."""
+    original_factory = executor_module.tempfile.NamedTemporaryFile
+    monkeypatch.setattr(
+        executor_module.tempfile,
+        "NamedTemporaryFile",
+        _failing_write_factory(original_factory),
+    )
+    destination = tmp_path / "run"
+
+    with pytest.raises(OSError, match="write failure"):
+        DryRunExecutor().execute(
+            _rendered(), _decision(), destination, "run", "INV-100", "key-100"
+        )
+
+    assert list((destination / "emails" / "simulated_send").iterdir()) == []
+
+
+@pytest.mark.parametrize(
+    ("method", "suffix", "failure_point"),
+    [
+        ("_write_csv", ".csv", "fsync"),
+        ("_write_csv", ".csv", "replace"),
+        ("_write_json", ".json", "fsync"),
+        ("_write_json", ".json", "replace"),
+    ],
+)
+def test_output_atomic_writers_remove_temporary_files_when_replace_fails(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, method: str, suffix: str, failure_point: str
+):
+    """A failed CSV or JSON fsync/replacement must not leave staged evidence behind."""
+    destination = tmp_path / "output"
+    destination.mkdir()
+    monkeypatch.setattr(writer_module.os, failure_point, _raise_atomic_failure)
+
+    with pytest.raises(OSError, match="atomic failure"):
+        if method == "_write_csv":
+            OutputWriter._write_csv(destination / f"evidence{suffix}", ["value"], [{"value": "x"}])
+        else:
+            OutputWriter._write_json(destination / f"evidence{suffix}", {"value": "x"})
+
+    assert list(destination.iterdir()) == []
+
+
+@pytest.mark.parametrize(("method", "suffix"), [("_write_csv", ".csv"), ("_write_json", ".json")])
+def test_output_atomic_writers_remove_temporary_files_when_write_fails(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, method: str, suffix: str
+):
+    """A failed CSV or JSON write must not leave staged evidence behind."""
+    destination = tmp_path / "output"
+    destination.mkdir()
+    original_factory = writer_module.tempfile.NamedTemporaryFile
+    monkeypatch.setattr(
+        writer_module.tempfile,
+        "NamedTemporaryFile",
+        _failing_write_factory(original_factory),
+    )
+
+    with pytest.raises(OSError, match="write failure"):
+        if method == "_write_csv":
+            OutputWriter._write_csv(destination / f"evidence{suffix}", ["value"], [{"value": "x"}])
+        else:
+            OutputWriter._write_json(destination / f"evidence{suffix}", {"value": "x"})
+
+    assert list(destination.iterdir()) == []
+
+
+def _raise_atomic_failure(*_args: object) -> None:
+    raise OSError("atomic failure")
+
+
+def _failing_write_factory(original_factory: object):
+    def factory(*args: object, **kwargs: object) -> _WriteFailingTemporaryFile:
+        return _WriteFailingTemporaryFile(original_factory(*args, **kwargs))  # type: ignore[operator]
+
+    return factory
+
+
+class _WriteFailingTemporaryFile:
+    def __init__(self, temporary: object) -> None:
+        self._temporary = temporary
+
+    @property
+    def name(self) -> str:
+        return self._temporary.name  # type: ignore[no-any-return, union-attr]
+
+    def __enter__(self) -> Self:
+        self._temporary.__enter__()  # type: ignore[union-attr]
+        return self
+
+    def __exit__(self, *args: object) -> object:
+        return self._temporary.__exit__(*args)  # type: ignore[union-attr]
+
+    def write(self, _content: object) -> None:
+        raise OSError("write failure")
+
+    def __getattr__(self, name: str) -> object:
+        return getattr(self._temporary, name)
 
 
 def test_output_writer_creates_complete_stable_contract_and_truthful_counts(tmp_path: Path):
