@@ -20,7 +20,7 @@ def _contains_any_invoice_reference(message: EmailMessage) -> bool:
 
 
 def _ordered(messages: Sequence[EmailMessage]) -> list[EmailMessage]:
-    return sorted(messages, key=lambda message: message.received_at)
+    return sorted(messages, key=lambda message: (message.received_at, message.message_id))
 
 
 def _result(

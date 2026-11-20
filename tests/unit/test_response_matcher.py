@@ -56,6 +56,18 @@ def test_prior_thread_id_overrides_document_and_sender_matching():
     assert result.requires_ambiguous_assessment is False
 
 
+def test_equal_received_times_are_ordered_by_message_id():
+    target = record()
+    messages = [
+        message("thread-b", thread_id="thread-100"),
+        message("thread-a", thread_id="thread-100"),
+    ]
+
+    result = match_responses(target, [target], messages, prior_thread_id="thread-100")
+
+    assert [item.message_id for item in result.messages] == ["thread-a", "thread-b"]
+
+
 def test_subject_document_match_requires_exact_normalized_sender():
     target = record()
     subject_match = message("subject-match", sender=" AR@ACME.EXAMPLE.TEST ", subject="RE: inv-100")
