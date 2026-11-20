@@ -117,6 +117,46 @@ class AuditRepository:
         with self._transaction() as connection:
             for statement in statements:
                 connection.execute(statement)
+            if not self._has_column(connection, "invoice_traces", "action_id"):
+                self._migrate_invoice_traces_add_action_reference(connection)
+
+    @staticmethod
+    def _has_column(connection: sqlite3.Connection, table: str, column: str) -> bool:
+        return any(row["name"] == column for row in connection.execute(f"PRAGMA table_info({table})"))
+
+    @staticmethod
+    def _migrate_invoice_traces_add_action_reference(connection: sqlite3.Connection) -> None:
+        """Rebuild the legacy trace table with its nullable action foreign key."""
+        connection.execute("ALTER TABLE invoice_traces RENAME TO invoice_traces_legacy")
+        connection.execute(
+            """
+            CREATE TABLE invoice_traces (
+                run_id TEXT NOT NULL REFERENCES runs(run_id),
+                document_number TEXT NOT NULL,
+                record_json TEXT CHECK(record_json IS NULL OR json_valid(record_json)),
+                eligibility_json TEXT CHECK(eligibility_json IS NULL OR json_valid(eligibility_json)),
+                match_json TEXT CHECK(match_json IS NULL OR json_valid(match_json)),
+                response_json TEXT CHECK(response_json IS NULL OR json_valid(response_json)),
+                decision_json TEXT CHECK(decision_json IS NULL OR json_valid(decision_json)),
+                action_id TEXT REFERENCES actions(action_id),
+                action_json TEXT CHECK(action_json IS NULL OR json_valid(action_json)),
+                error_json TEXT CHECK(error_json IS NULL OR json_valid(error_json)),
+                PRIMARY KEY (run_id, document_number)
+            )
+            """
+        )
+        connection.execute(
+            """
+            INSERT INTO invoice_traces (
+                run_id, document_number, record_json, eligibility_json, match_json,
+                response_json, decision_json, action_id, action_json, error_json
+            )
+            SELECT run_id, document_number, record_json, eligibility_json, match_json,
+                   response_json, decision_json, NULL, action_json, error_json
+            FROM invoice_traces_legacy
+            """
+        )
+        connection.execute("DROP TABLE invoice_traces_legacy")
 
     def start_run(self, request: RunRequest) -> str:
         """Start a run and return its opaque identifier."""

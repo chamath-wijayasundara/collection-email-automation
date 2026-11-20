@@ -82,6 +82,51 @@ def _decision() -> DecisionResult:
     )
 
 
+def _create_legacy_database(database_path: Path) -> None:
+    """Create the audit schema as it existed before trace action references."""
+    with sqlite3.connect(database_path) as connection:
+        connection.executescript(
+            """
+            CREATE TABLE runs (
+                run_id TEXT PRIMARY KEY,
+                request_json TEXT NOT NULL CHECK(json_valid(request_json)),
+                started_at TEXT NOT NULL,
+                completed_at TEXT,
+                result_json TEXT CHECK(result_json IS NULL OR json_valid(result_json)),
+                exit_code INTEGER
+            );
+            CREATE TABLE actions (
+                action_id TEXT PRIMARY KEY,
+                idempotency_key TEXT NOT NULL UNIQUE,
+                intended_action TEXT NOT NULL,
+                artifact_path TEXT NOT NULL,
+                action_reused INTEGER NOT NULL CHECK(action_reused IN (0, 1)),
+                reused_from_action_id TEXT REFERENCES actions(action_id)
+            );
+            CREATE TABLE invoice_traces (
+                run_id TEXT NOT NULL REFERENCES runs(run_id),
+                document_number TEXT NOT NULL,
+                record_json TEXT CHECK(record_json IS NULL OR json_valid(record_json)),
+                eligibility_json TEXT CHECK(eligibility_json IS NULL OR json_valid(eligibility_json)),
+                match_json TEXT CHECK(match_json IS NULL OR json_valid(match_json)),
+                response_json TEXT CHECK(response_json IS NULL OR json_valid(response_json)),
+                decision_json TEXT CHECK(decision_json IS NULL OR json_valid(decision_json)),
+                action_json TEXT CHECK(action_json IS NULL OR json_valid(action_json)),
+                error_json TEXT CHECK(error_json IS NULL OR json_valid(error_json)),
+                PRIMARY KEY (run_id, document_number)
+            );
+            """
+        )
+        connection.execute(
+            "INSERT INTO runs (run_id, request_json, started_at) VALUES (?, ?, ?)",
+            ("legacy-run", "{}", "2026-04-01T00:00:00+00:00"),
+        )
+        connection.execute(
+            "INSERT INTO invoice_traces (run_id, document_number, record_json) VALUES (?, ?, ?)",
+            ("legacy-run", "LEGACY-100", '{"source":"legacy"}'),
+        )
+
+
 def test_initialize_is_repeatable_and_round_trips_invoice_evidence(tmp_path: Path):
     """A missing schema or lossy evidence serialization would break this trace."""
     database_path = tmp_path / "audit.sqlite3"
@@ -256,6 +301,46 @@ def test_invoice_trace_requires_a_persisted_action_and_round_trips_its_evidence(
         )
 
     assert repository.get_invoice_trace(run_id, "INV-100") is None
+    repository.record_action(action)
+    repository.record_invoice(
+        run_id=run_id,
+        record=_record(),
+        eligibility=_eligibility(),
+        action=action,
+    )
+
+    assert repository.get_invoice_trace(run_id, "INV-100")["action"] == action.model_dump(mode="json")
+
+
+def test_initialize_migrates_legacy_traces_and_enforces_action_foreign_keys(tmp_path: Path):
+    """A schema upgrade must retain old evidence while protecting future action traces."""
+    database_path = tmp_path / "audit.sqlite3"
+    _create_legacy_database(database_path)
+    repository = AuditRepository(database_path)
+
+    repository.initialize()
+    repository.initialize()
+
+    assert repository.get_invoice_trace("legacy-run", "LEGACY-100")["record"] == {"source": "legacy"}
+    run_id = repository.start_run(_request(database_path))
+    action = ActionResult(
+        action_id="migrated-action",
+        idempotency_key=compute_action_key(
+            "file-sha-256", date(2026, 4, 1), "INV-100", ReminderStage.FIRST, "v1"
+        ),
+        intended_action=IntendedAction.READY_TO_SEND,
+        artifact_path=Path("emails/simulated_send/INV-100.eml"),
+        action_reused=False,
+    )
+
+    with pytest.raises(sqlite3.IntegrityError):
+        repository.record_invoice(
+            run_id=run_id,
+            record=_record(),
+            eligibility=_eligibility(),
+            action=action,
+        )
+
     repository.record_action(action)
     repository.record_invoice(
         run_id=run_id,
