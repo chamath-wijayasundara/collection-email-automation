@@ -31,3 +31,6 @@ target-version = "py312"
 
 [tool.setuptools.packages.find]
 where = ["src"]
+
+[tool.setuptools.package-data]
+collection_email = ["emails/templates/*.j2", "responses/*.json"]
