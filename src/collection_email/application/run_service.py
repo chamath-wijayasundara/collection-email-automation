@@ -70,7 +70,11 @@ class RunService:
         if self._repository is None:
             if self._database_path is None:
                 raise ValueError("RunService needs a database path before inspection.")
-            self._repository = self._repository_factory(self._database_path)
+            if not self._database_path.is_file():
+                raise FileNotFoundError(f"Audit database does not exist: {self._database_path}")
+            repository = self._repository_factory(self._database_path)
+            repository.initialize()
+            self._repository = repository
         return self._repository.get_invoice_trace(run_id, trace_reference)
 
     def run(self, request: RunRequest) -> RunResult:

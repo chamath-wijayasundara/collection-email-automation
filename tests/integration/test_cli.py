@@ -1,5 +1,6 @@
 """Command-line contracts for the offline collection assessment workflow."""
 
+import sqlite3
 from pathlib import Path
 from zipfile import ZIP_DEFLATED, ZipFile
 
@@ -29,6 +30,54 @@ def _run_args(tmp_path: Path) -> list[str]:
 
 def _run_id(output: str) -> str:
     return next(line.removeprefix("Run ID: ") for line in output.splitlines() if line.startswith("Run ID: "))
+
+
+def _create_pre_trace_id_database(database: Path) -> None:
+    """Create the audit schema immediately before source trace IDs were added."""
+    with sqlite3.connect(database) as connection:
+        connection.executescript(
+            """
+            CREATE TABLE runs (
+                run_id TEXT PRIMARY KEY,
+                request_json TEXT NOT NULL CHECK(json_valid(request_json)),
+                started_at TEXT NOT NULL,
+                completed_at TEXT,
+                result_json TEXT CHECK(result_json IS NULL OR json_valid(result_json)),
+                exit_code INTEGER
+            );
+            CREATE TABLE actions (
+                action_id TEXT PRIMARY KEY,
+                idempotency_key TEXT NOT NULL UNIQUE,
+                intended_action TEXT NOT NULL,
+                artifact_path TEXT NOT NULL,
+                action_reused INTEGER NOT NULL CHECK(action_reused IN (0, 1)),
+                reused_from_action_id TEXT REFERENCES actions(action_id)
+            );
+            CREATE TABLE invoice_traces (
+                run_id TEXT NOT NULL REFERENCES runs(run_id),
+                document_number TEXT NOT NULL,
+                record_json TEXT CHECK(record_json IS NULL OR json_valid(record_json)),
+                eligibility_json TEXT CHECK(eligibility_json IS NULL OR json_valid(eligibility_json)),
+                match_json TEXT CHECK(match_json IS NULL OR json_valid(match_json)),
+                response_json TEXT CHECK(response_json IS NULL OR json_valid(response_json)),
+                decision_json TEXT CHECK(decision_json IS NULL OR json_valid(decision_json)),
+                action_id TEXT REFERENCES actions(action_id),
+                action_json TEXT CHECK(action_json IS NULL OR json_valid(action_json)),
+                error_json TEXT CHECK(error_json IS NULL OR json_valid(error_json)),
+                source_envelope_json TEXT CHECK(
+                    source_envelope_json IS NULL OR json_valid(source_envelope_json)
+                ),
+                PRIMARY KEY (run_id, document_number)
+            );
+            INSERT INTO runs (run_id, request_json, started_at)
+            VALUES ('legacy-run', '{}', '2026-04-01T00:00:00+00:00');
+            INSERT INTO invoice_traces (
+                run_id, document_number, record_json, source_envelope_json
+            ) VALUES (
+                'legacy-run', 'LEGACY-100', '{"source":"legacy"}', '{"source_row":2}'
+            );
+            """
+        )
 
 
 def test_help_lists_each_assessor_command():
@@ -200,3 +249,51 @@ def test_inspect_prints_persisted_invoice_evidence_and_unknown_is_one(tmp_path: 
     assert "artifact_path" in inspected.output
     assert missing.exit_code == 1
     assert "ERROR: No trace found" in missing.output
+
+
+def test_inspect_migrates_pre_trace_id_database_before_any_new_run(tmp_path: Path):
+    """Existing audit evidence must remain inspectable before another run upgrades it."""
+    database = tmp_path / "legacy.sqlite3"
+    _create_pre_trace_id_database(database)
+
+    result = CliRunner().invoke(
+        app,
+        [
+            "inspect",
+            "--database",
+            str(database),
+            "--run-id",
+            "legacy-run",
+            "--invoice",
+            "LEGACY-100",
+        ],
+    )
+
+    assert result.exit_code == 0
+    assert 'Normalized input: {"source": "legacy"}' in result.output
+    assert 'Source envelope: {"source_row": 2}' in result.output
+    with sqlite3.connect(database) as connection:
+        columns = {row[1] for row in connection.execute("PRAGMA table_info(invoice_traces)")}
+    assert "trace_id" in columns
+
+
+def test_inspect_missing_database_is_an_error_without_creating_a_file(tmp_path: Path):
+    """Inspecting cannot silently turn a path typo into an empty audit database."""
+    database = tmp_path / "missing.sqlite3"
+
+    result = CliRunner().invoke(
+        app,
+        [
+            "inspect",
+            "--database",
+            str(database),
+            "--run-id",
+            "missing-run",
+            "--invoice",
+            "MISSING-100",
+        ],
+    )
+
+    assert result.exit_code == 2
+    assert "ERROR:" in result.output
+    assert not database.exists()
