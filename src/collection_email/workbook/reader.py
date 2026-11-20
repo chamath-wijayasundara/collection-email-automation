@@ -6,8 +6,10 @@ from datetime import date, datetime
 from decimal import Decimal, InvalidOperation
 from pathlib import Path
 from typing import Any
+from zipfile import BadZipFile
 
 from openpyxl import load_workbook
+from openpyxl.utils.exceptions import InvalidFileException
 
 from collection_email.domain.models import (
     ARRecord,
@@ -94,6 +96,14 @@ def _as_int(value: object) -> int | None:
 
 def read_workbook(path: Path, as_of_override: date | None = None) -> WorkbookReadResult:
     """Read the required workbook structure and control date."""
+    try:
+        return _read_workbook(path, as_of_override)
+    except (OSError, BadZipFile, InvalidFileException) as error:
+        raise FileValidationError(f"Unable to open workbook: {path}") from error
+
+
+def _read_workbook(path: Path, as_of_override: date | None = None) -> WorkbookReadResult:
+    """Read validated workbook content after its file can be opened."""
     formula_book = load_workbook(path, data_only=False)
     value_book = load_workbook(path, data_only=True)
     if "AR_Data" not in formula_book.sheetnames:

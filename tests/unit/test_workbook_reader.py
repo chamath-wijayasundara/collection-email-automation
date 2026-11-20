@@ -71,6 +71,23 @@ def test_missing_as_of_date_is_a_file_validation_error(tmp_path):
         read_workbook(path)
 
 
+def test_missing_workbook_is_a_file_validation_error(tmp_path):
+    """Unreadable input must preserve the application's file-error contract."""
+    path = tmp_path / "missing.xlsx"
+
+    with pytest.raises(FileValidationError, match="Unable to open workbook"):
+        read_workbook(path)
+
+
+def test_invalid_workbook_is_a_file_validation_error(tmp_path):
+    """A non-XLSX file should not leak an openpyxl or ZIP implementation error."""
+    path = tmp_path / "invalid.xlsx"
+    path.write_text("not an Excel workbook", encoding="utf-8")
+
+    with pytest.raises(FileValidationError, match="Unable to open workbook"):
+        read_workbook(path)
+
+
 @pytest.mark.parametrize(
     ("field", "value"),
     [

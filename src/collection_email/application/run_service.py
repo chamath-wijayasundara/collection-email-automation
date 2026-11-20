@@ -78,6 +78,8 @@ class RunService:
         workbook = self.validate(request.input_path, request.as_of_override)
         mailbox = load_mailbox_fixture(request.mailbox_path)
 
+        Path(request.database_path).parent.mkdir(parents=True, exist_ok=True)
+        Path(request.output_root).mkdir(parents=True, exist_ok=True)
         repository = self._repository_factory(request.database_path)
         repository.initialize()
         self._repository = repository
@@ -194,8 +196,11 @@ class RunService:
         repository: AuditRepository,
     ) -> None:
         match = match_responses(record, eligible_records, mailbox_messages)
+        trace["match"] = self._json_model(match)
         response = self._classifier.assess(match)
+        trace["response"] = self._json_model(response)
         decision = decide(eligibility, response)
+        trace["decision"] = self._json_model(decision)
         rendered = self._renderer.render(record, eligibility, response, decision)
         action_key = compute_action_key(
             file_fingerprint,
@@ -217,9 +222,6 @@ class RunService:
         if prior_action is None:
             repository.record_action(action)
 
-        trace["match"] = self._json_model(match)
-        trace["response"] = self._json_model(response)
-        trace["decision"] = self._json_model(decision)
         trace["action"] = self._json_model(action)
         repository.record_invoice(
             run_id,

@@ -84,6 +84,8 @@ def test_one_invoice_failure_does_not_abort_batch(tmp_path: Path):
 
     assert result.exit_code == 1
     assert failed is not None
+    assert failed["match"] is not None
+    assert failed["response"] is not None
     assert failed["decision"]["intended_action"] == "failed"
     assert failed["error"]["code"] == "unexpected_processing_error"
     assert "renderer fixture failure" in failed["error"]["message"]
@@ -92,6 +94,22 @@ def test_one_invoice_failure_does_not_abort_batch(tmp_path: Path):
     assert normal["action"] is not None
     assert Path(normal["action"]["artifact_path"]).is_file()
     assert len((result.output_dir / "errors.csv").read_text(encoding="utf-8").splitlines()) == 2
+
+
+def test_run_creates_nested_database_and_output_parents(tmp_path: Path):
+    """A clean documented destination must not require manual directory setup."""
+    request = RunRequest(
+        input_path=WORKBOOK,
+        mailbox_path=MAILBOX,
+        output_root=tmp_path / "nested" / "outputs" / "demo",
+        database_path=tmp_path / "nested" / "outputs" / "collection_email.db",
+    )
+
+    result = RunService().run(request)
+
+    assert result.exit_code == 0
+    assert request.database_path.is_file()
+    assert result.output_dir.is_dir()
 
 
 def test_identical_rerun_reuses_logical_actions_and_copies_artifacts(tmp_path: Path):
