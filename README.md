@@ -52,9 +52,9 @@ Actions: 216
 Errors: 0
 ```
 
-Use that printed run ID in the following commands. The first request shows a
-normal initial-reminder/no-response case; the second shows an escalation trace
-with a review-required response:
+Use that printed run ID in the following commands. The first request shows an
+escalation trace with a payment-promised response that is drafted for human
+review; the second shows a normal initial-reminder/no-response case:
 
 ```sh
 .venv/bin/collection-email inspect \
