@@ -1,0 +1,5 @@
+<p>Dear {{ customer_name }},</p>
+<p>This is an initial reminder that invoice {{ document_number }} for {{ amount }} was due on {{ due_date }}. The current reminder stage is {{ stage }}.</p>
+<p>Please arrange payment at your earliest convenience.</p>
+{% if response_context %}<p><strong>Response context for review:</strong> {{ response_context }}</p>{% endif %}
+<p>Kind regards,<br>Collections</p>

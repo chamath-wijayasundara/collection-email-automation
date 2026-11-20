@@ -1,0 +1,13 @@
+Dear {{ customer_name }},
+
+This is the first reminder that invoice {{ document_number }} for {{ amount }} was due on {{ due_date }}.
+The current reminder stage is {{ stage }}.
+
+Please arrange payment promptly.
+{% if response_context %}
+
+Response context for review: {{ response_context }}
+{% endif %}
+
+Kind regards,
+Collections

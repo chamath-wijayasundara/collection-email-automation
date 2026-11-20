@@ -1,0 +1,5 @@
+<p>Dear {{ customer_name }},</p>
+<p>Invoice {{ document_number }} for {{ amount }} has remained overdue since {{ due_date }}. The current reminder stage is {{ stage }}.</p>
+<p>This escalation requires immediate attention. Please arrange payment or contact Collections immediately.</p>
+{% if response_context %}<p><strong>Response context for review:</strong> {{ response_context }}</p>{% endif %}
+<p>Kind regards,<br>Collections</p>

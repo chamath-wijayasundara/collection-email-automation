@@ -1,0 +1,13 @@
+Dear {{ customer_name }},
+
+This is the second reminder that invoice {{ document_number }} for {{ amount }} remains overdue since {{ due_date }}.
+The current reminder stage is {{ stage }}.
+
+Please confirm when payment will be made.
+{% if response_context %}
+
+Response context for review: {{ response_context }}
+{% endif %}
+
+Kind regards,
+Collections

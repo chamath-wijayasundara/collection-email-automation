@@ -1,0 +1,13 @@
+Dear {{ customer_name }},
+
+Invoice {{ document_number }} for {{ amount }} has remained overdue since {{ due_date }}.
+The current reminder stage is {{ stage }}.
+
+This escalation requires immediate attention. Please arrange payment or contact Collections immediately.
+{% if response_context %}
+
+Response context for review: {{ response_context }}
+{% endif %}
+
+Kind regards,
+Collections
