@@ -1,0 +1,121 @@
+[
+  {
+    "message_id": "payment-promised-1",
+    "thread_id": "thread-10001",
+    "sender": "ar@cedarpackagingholdings.example.com",
+    "recipients": ["collections@example.test"],
+    "subject": "Re: INV-2026-10001",
+    "body": "We will pay INV-2026-10001 on 27 March 2026.",
+    "received_at": "2026-03-25T09:00:00Z"
+  },
+  {
+    "message_id": "payment-already-made-1",
+    "sender": "ar@deltasuppliesllc.example.com",
+    "recipients": ["collections@example.test"],
+    "subject": "Payment sent for INV-2026-10004",
+    "body": "Payment has already been made for this invoice.",
+    "received_at": "2026-03-25T09:05:00Z"
+  },
+  {
+    "message_id": "partial-payment-1",
+    "sender": "ar@bluemotorsllc.example.com",
+    "recipients": ["collections@example.test"],
+    "subject": "INV-2026-10005 payment update",
+    "body": "We have paid part of INV-2026-10005; the balance will follow.",
+    "received_at": "2026-03-25T09:10:00Z"
+  },
+  {
+    "message_id": "dispute-1",
+    "sender": "ar@summitbuildersinc.example.com",
+    "recipients": ["collections@example.test"],
+    "subject": "Query about INV-2026-10008",
+    "body": "We dispute the amount on INV-2026-10008 and need this investigated.",
+    "received_at": "2026-03-25T09:15:00Z"
+  },
+  {
+    "message_id": "document-request-1",
+    "sender": "ar@lumenretailllc.example.com",
+    "recipients": ["collections@example.test"],
+    "subject": "INV-2026-10010",
+    "body": "Please send a copy of the invoice and purchase order.",
+    "received_at": "2026-03-25T09:20:00Z"
+  },
+  {
+    "message_id": "out-of-office-1",
+    "sender": "ar@titanhealthholdings.example.com",
+    "recipients": ["collections@example.test"],
+    "subject": "Automatic reply: INV-2026-10014",
+    "body": "I am out of office until 30 March 2026 with limited access to email.",
+    "received_at": "2026-03-25T09:25:00Z"
+  },
+  {
+    "message_id": "bounce-1",
+    "sender": "mailer-daemon@example.test",
+    "recipients": ["collections@example.test"],
+    "subject": "Undeliverable: INV-2026-10015",
+    "body": "Delivery failed because the recipient address is invalid.",
+    "received_at": "2026-03-25T09:30:00Z"
+  },
+  {
+    "message_id": "no-meaningful-response-1",
+    "sender": "ar@keystonetextilesholdings.example.com",
+    "recipients": ["collections@example.test"],
+    "subject": "Re: INV-2026-10016",
+    "body": "Thanks for your email.",
+    "received_at": "2026-03-25T09:35:00Z"
+  },
+  {
+    "message_id": "ambiguous-conflict-1",
+    "sender": "ar@willowtravelco.example.com",
+    "recipients": ["collections@example.test"],
+    "subject": "INV-2026-10018",
+    "body": "We dispute this invoice, but payment will be made on 27 March 2026.",
+    "received_at": "2026-03-25T09:40:00Z"
+  },
+  {
+    "message_id": "thread-reply-1",
+    "thread_id": "thread-10019",
+    "sender": "ar@titanretailltd.example.com",
+    "recipients": ["collections@example.test"],
+    "subject": "Re: INV-2026-10019",
+    "body": "We are checking INV-2026-10019 with our finance team.",
+    "received_at": "2026-03-25T08:00:00Z"
+  },
+  {
+    "message_id": "thread-reply-2",
+    "thread_id": "thread-10019",
+    "sender": "ar@titanretailltd.example.com",
+    "recipients": ["collections@example.test"],
+    "subject": "Re: INV-2026-10019",
+    "body": "Update: we will pay INV-2026-10019 on 27 March 2026.",
+    "received_at": "2026-03-25T10:00:00Z"
+  },
+  {
+    "message_id": "wrong-invoice-1",
+    "sender": "ar@cedarpackagingholdings.example.com",
+    "recipients": ["collections@example.test"],
+    "subject": "Question about INV-2026-99999",
+    "body": "This question is about INV-2026-99999, not any other invoice.",
+    "received_at": "2026-03-25T10:05:00Z"
+  },
+  {
+    "message_id": "sender-only-single-1",
+    "sender": "ar@cedarpackagingholdings.example.com",
+    "recipients": ["collections@example.test"],
+    "subject": "A question for accounts",
+    "body": "Could you call me about the outstanding balance?",
+    "received_at": "2026-03-25T10:10:00Z"
+  },
+  {
+    "message_id": "sender-only-multiple-1",
+    "sender": "ar@shared-customer.example.test",
+    "recipients": ["collections@example.test"],
+    "subject": "Accounts question",
+    "body": "Please contact us about the balance.",
+    "received_at": "2026-03-25T10:15:00Z"
+  },
+  {
+    "message_id": "malformed-fixture-1",
+    "sender": "missing-required-fields@example.test"
+  }
+]
